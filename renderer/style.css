@@ -1,0 +1,78 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  pointer-events: none; /* whole overlay is click-through by default */
+}
+
+#pochi-wrap {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 144px;
+  /* Positioned purely by transform, written once per animation frame by
+     renderer.js's rAF loop. No CSS transition on purpose: the loop is the
+     only thing that may move her, so the pose she's showing and where she
+     is can never be driven by two different clocks. translate3d keeps it
+     on the compositor rather than triggering layout every frame. */
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  pointer-events: none;
+}
+
+#pochi-sprite {
+  display: block;
+  width: 144px;
+  height: 144px;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35));
+  cursor: grab;
+  pointer-events: auto; /* this is the one hoverable/clickable hit area */
+  transition: opacity 0.35s ease;
+}
+
+#pochi-sprite.is-dragging {
+  cursor: grabbing;
+}
+
+#pochi-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%) translateY(-8px);
+  max-width: 220px;
+  min-width: 90px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #222;
+  font: 13px/1.35 -apple-system, "Segoe UI", sans-serif;
+  border-radius: 12px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+#pochi-bubble.visible {
+  opacity: 1;
+}
+
+#pochi-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.95);
+}

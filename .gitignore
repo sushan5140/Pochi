@@ -1,0 +1,47 @@
+# Dependencies — restore with `npm install`
+node_modules/
+
+# Personal usage data.
+# electron-store writes these to app.getPath('userData')
+# (%APPDATA%\pochi\), not here — listed defensively in case a dev
+# run ever drops them in the project root.
+pochi-state.json
+pochi-memory.json
+*-state.json
+*-memory.json
+
+# Electron runtime artifacts
+DevToolsActivePort
+Cache/
+Code Cache/
+GPUCache/
+Local Storage/
+Session Storage/
+blob_storage/
+
+# Build output (electron-builder / packager)
+dist/
+out/
+build/
+release/
+*.asar
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS / editor cruft
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.vscode/
+.idea/
+*.swp

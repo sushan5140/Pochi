@@ -1,0 +1,18 @@
+{
+  "name": "pochi",
+  "version": "0.1.0",
+  "description": "A tiny always-on-top transparent desktop pet that walks the screen and nags you about water/food/sleep/battery.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "active-win": "^8.2.1",
+    "electron-store": "^8.2.0",
+    "systeminformation": "^5.23.5"
+  },
+  "devDependencies": {
+    "electron": "^31.3.0"
+  }
+}
