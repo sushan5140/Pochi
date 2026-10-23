@@ -58,6 +58,10 @@ const GAIT_BOB_PX = { side: 0, front: 0, back: 3 };
 const GAIT_SWAY_PX = { side: 0, front: 0, back: 1.5 };
 
 const SPEEDS = { normal: 130, sleepy: 70 };
+// M1.1 L1: speed ramps instead of snapping immediately to walking pace.
+// Keep stride frames distance-based, so slowing down also slows the feet.
+const WALK_ACCEL_PX_S2 = 320;
+const WALK_BRAKE_PX_S2 = 440;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -108,6 +112,7 @@ const sim = {
   targetY: 0,
   moving: false,
   speed: SPEEDS.normal,
+  currentSpeed: 0,
   distanceWalked: 0,
   walkSet: 'side',
   facingLeft: false
@@ -147,6 +152,7 @@ function updateViewSet(ux, uy) {
 function stopMoving(reachedTarget) {
   if (!sim.moving) return;
   sim.moving = false;
+  sim.currentSpeed = 0;
   sim.distanceWalked = 0;
   window.pochi.settled({ x: sim.x, y: sim.y, reachedTarget });
 }
@@ -265,19 +271,32 @@ function loop(now) {
     const dx = sim.targetX - sim.x;
     const dy = sim.targetY - sim.y;
     const remaining = Math.hypot(dx, dy);
-    const step = sim.speed * dt;
-
-    if (remaining <= step || remaining < 0.5) {
+    if (remaining < 0.5) {
       sim.x = sim.targetX;
       sim.y = sim.targetY;
       stopMoving(true);
     } else {
+      // Braking envelope: v^2 <= 2*a*distance. This makes arrival gentle
+      // while retaining the existing max normal/sleepy speeds.
+      const safeSpeed = Math.min(sim.speed, Math.sqrt(2 * WALK_BRAKE_PX_S2 * remaining));
+      const rate = safeSpeed < sim.currentSpeed ? WALK_BRAKE_PX_S2 : WALK_ACCEL_PX_S2;
+      const delta = rate * dt;
+      const nextSpeed = sim.currentSpeed + Math.max(-delta, Math.min(delta, safeSpeed - sim.currentSpeed));
+      const step = Math.min(remaining, (sim.currentSpeed + nextSpeed) * 0.5 * dt);
+      sim.currentSpeed = nextSpeed;
+
       const ux = dx / remaining;
       const uy = dy / remaining;
       sim.x += ux * step;
       sim.y += uy * step;
       sim.distanceWalked += step;
       updateViewSet(ux, uy);
+
+      if (step >= remaining || remaining - step < 0.5) {
+        sim.x = sim.targetX;
+        sim.y = sim.targetY;
+        stopMoving(true);
+      }
     }
   }
 
@@ -330,6 +349,7 @@ function applyState(data) {
   if (data.place) {
     sim.x = data.place.x;
     sim.y = data.place.y;
+    sim.currentSpeed = 0;
     stopMoving(false);
   }
 
