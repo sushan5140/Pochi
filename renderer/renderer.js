@@ -66,6 +66,10 @@ const WALK_BRAKE_PX_S2 = 440;
 const SHARP_TURN_RAD = Math.PI / 3;
 const TURN_RATE_RAD_S = Math.PI * 2; // 180 degrees in about half a second
 const TURN_EPSILON_RAD = 0.025;
+// M1.1 L3: shorter trips are strolls, not full-speed sprints. Long trips
+// retain their original gait cap; sleepy mode keeps its stricter cap.
+const SHORT_TRIP_PX = 120;
+const SHORT_TRIP_MIN_FACTOR = 0.45;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -116,6 +120,7 @@ const sim = {
   targetY: 0,
   moving: false,
   speed: SPEEDS.normal,
+  cruiseSpeed: SPEEDS.normal,
   currentSpeed: 0,
   turning: false,
   heading: 0,
@@ -154,6 +159,11 @@ function updateViewSet(ux, uy) {
     sim.walkSet = 'side';
     sim.facingLeft = ux < 0;
   }
+}
+
+function adaptiveCruiseSpeed(distance, gaitSpeed) {
+  const fraction = Math.min(1, Math.max(0, distance / SHORT_TRIP_PX));
+  return gaitSpeed * (SHORT_TRIP_MIN_FACTOR + (1 - SHORT_TRIP_MIN_FACTOR) * fraction);
 }
 
 function shortestAngle(from, to) {
@@ -314,7 +324,7 @@ function loop(now) {
     } else {
       // Braking envelope: v^2 <= 2*a*distance. This makes arrival gentle
       // while retaining the existing max normal/sleepy speeds.
-      const safeSpeed = Math.min(sim.speed, Math.sqrt(2 * WALK_BRAKE_PX_S2 * remaining));
+      const safeSpeed = Math.min(sim.cruiseSpeed, Math.sqrt(2 * WALK_BRAKE_PX_S2 * remaining));
       const rate = safeSpeed < sim.currentSpeed ? WALK_BRAKE_PX_S2 : WALK_ACCEL_PX_S2;
       const delta = rate * dt;
       const nextSpeed = sim.currentSpeed + Math.max(-delta, Math.min(delta, safeSpeed - sim.currentSpeed));
@@ -409,6 +419,7 @@ function applyState(data) {
     sim.targetX = data.target.x;
     sim.targetY = data.target.y;
     sim.speed = SPEEDS[data.gait] || SPEEDS.normal;
+    sim.cruiseSpeed = adaptiveCruiseSpeed(Math.hypot(dx, dy), sim.speed);
     // distanceWalked deliberately carries over on a retarget, so being
     // redirected mid-stride continues the gait instead of hitching.
     sim.moving = true;
