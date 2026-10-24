@@ -142,3 +142,25 @@ test('movement and dragging cannot initiate overlapping jumps', () => {
   assert.equal(h.sample('sim.jumpY'), 0);
   assert.equal(h.sample('sim.jumpVelocity'), 0);
 });
+
+test('landing produces a short squash and returns to neutral proportions', () => {
+  const h = harness();
+  assert.equal(h.sample('startJump()'), true);
+  for (let i = 0; i < 90 && h.sample('sim.landingTime') === 0; i++) h.advance();
+  assert.ok(h.sample('sim.landingTime') > 0, 'ground contact triggers recovery');
+  h.advance(2);
+  assert.ok(h.sample('landingScale().x') > 1, 'horizontal squash expands');
+  assert.ok(h.sample('landingScale().y') < 1, 'vertical squash compresses');
+  for (let i = 0; i < 30 && h.sample('sim.landingTime') > 0; i++) h.advance();
+  assert.equal(h.sample('sim.landingTime'), 0, 'recovery finishes');
+  assert.equal(h.sample('landingScale().x'), 1);
+  assert.equal(h.sample('landingScale().y'), 1);
+  assert.equal(h.sample('sim.y'), 0, 'ground coordinates never shift');
+});
+
+test('new state cancels landing recovery to avoid overlapping animations', () => {
+  const h = harness();
+  h.sample('sim.landingTime = LANDING_RECOVERY_S');
+  h.send({ state: 'nagging_water', pose: 'water_bottle' });
+  assert.equal(h.sample('sim.landingTime'), 0);
+});
