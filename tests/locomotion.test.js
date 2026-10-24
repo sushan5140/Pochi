@@ -88,3 +88,31 @@ test('sleepy gait obeys the lower speed cap on a long walk', () => {
   h.advance(30);
   assert.ok(h.sample('sim.currentSpeed') <= 70);
 });
+
+test('short trips use a gentler cruise speed than long trips', () => {
+  const shortWalk = harness();
+  shortWalk.send({ state: 'walking', target: { x: 35, y: 0 }, gait: 'normal' });
+  const shortCap = shortWalk.sample('sim.cruiseSpeed');
+  const longWalk = harness();
+  longWalk.send({ state: 'walking', target: { x: 350, y: 0 }, gait: 'normal' });
+  const longCap = longWalk.sample('sim.cruiseSpeed');
+  assert.ok(shortCap < longCap);
+  assert.equal(longCap, 130);
+  assert.ok(shortCap > 0 && shortCap <= 130);
+});
+
+test('short-trip pacing still reaches target without overshoot', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 35, y: 0 }, gait: 'normal' });
+  for (let i = 0; i < 250 && h.sample('sim.moving'); i++) h.advance();
+  assert.equal(h.sample('sim.moving'), false);
+  assert.equal(h.sample('sim.x'), 35);
+  assert.equal(h.sample('sim.currentSpeed'), 0);
+});
+
+test('adaptive speed respects the sleepy gait cap', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 25, y: 0 }, gait: 'sleepy' });
+  assert.ok(h.sample('sim.cruiseSpeed') < 70);
+  assert.ok(h.sample('sim.cruiseSpeed') > 0);
+});
