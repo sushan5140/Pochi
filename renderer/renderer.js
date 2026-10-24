@@ -70,6 +70,9 @@ const TURN_EPSILON_RAD = 0.025;
 // retain their original gait cap; sleepy mode keeps its stricter cap.
 const SHORT_TRIP_PX = 120;
 const SHORT_TRIP_MIN_FACTOR = 0.45;
+// M1.2 L4: bounded, on-demand jump; vertical displacement is visual-only.
+const JUMP_VELOCITY_PX_S = -220;
+const JUMP_GRAVITY_PX_S2 = 750;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -122,6 +125,8 @@ const sim = {
   speed: SPEEDS.normal,
   cruiseSpeed: SPEEDS.normal,
   currentSpeed: 0,
+  jumpY: 0,
+  jumpVelocity: 0,
   turning: false,
   heading: 0,
   turnTarget: 0,
@@ -172,6 +177,24 @@ function shortestAngle(from, to) {
 
 function faceHeading(angle) {
   updateViewSet(Math.cos(angle), Math.sin(angle));
+}
+
+function startJump() {
+  if (dragging || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
+  sim.jumpVelocity = JUMP_VELOCITY_PX_S;
+  ensureLoop();
+  return true;
+}
+
+function updateJump(dt) {
+  if (sim.jumpVelocity === 0 && sim.jumpY === 0) return;
+  const nextVelocity = sim.jumpVelocity + JUMP_GRAVITY_PX_S2 * dt;
+  sim.jumpY += (sim.jumpVelocity + nextVelocity) * 0.5 * dt;
+  sim.jumpVelocity = nextVelocity;
+  if (sim.jumpY >= 0) {
+    sim.jumpY = 0;
+    sim.jumpVelocity = 0;
+  }
 }
 
 function stopMoving(reachedTarget) {
@@ -238,7 +261,7 @@ function gaitOffset() {
 }
 
 function render(now) {
-  const transform = `translate3d(${sim.x.toFixed(2)}px, ${sim.y.toFixed(2)}px, 0)`;
+  const transform = `translate3d(${sim.x.toFixed(2)}px, ${(sim.y + sim.jumpY).toFixed(2)}px, 0)`;
   if (transform !== lastTransform) {
     wrap.style.transform = transform;
     lastTransform = transform;
@@ -268,7 +291,7 @@ function render(now) {
 // compositor redraw the whole screen 60x a second even when she's stood
 // still — which is most of the time, and cost ~26% of a core.
 function isAnimating() {
-  return sim.moving || dragging || performance.now() < debugUntil;
+  return sim.moving || sim.jumpVelocity !== 0 || sim.jumpY !== 0 || dragging || performance.now() < debugUntil;
 }
 
 function ensureLoop() {
@@ -348,6 +371,7 @@ function loop(now) {
     }
   }
 
+  if (!dragging) updateJump(dt);
   render(now);
 
   if (isAnimating()) {
@@ -393,6 +417,11 @@ function applyState(data) {
   }
 
   if (dragging) return; // user has hold of her; ignore positioning intent
+  // State transitions take priority over an optional cosmetic jump.
+  if (sim.jumpY !== 0 || sim.jumpVelocity !== 0) {
+    sim.jumpY = 0;
+    sim.jumpVelocity = 0;
+  }
 
   if (data.place) {
     sim.x = data.place.x;
@@ -440,7 +469,13 @@ scheduleIdleRefresh();
 // expression. The preview is a timestamp the render function reads, not a
 // timer that suspends anything — she keeps walking underneath it and the
 // walk frames resume exactly in step when it expires.
-sprite.addEventListener('click', () => {
+sprite.addEventListener('click', (event) => {
+  // Explicit opt-in: Ctrl+click performs one small jump, leaving the normal
+  // click/double-click, nag resolution, and mini-game semantics untouched.
+  if (event.ctrlKey && latest.state === 'idle') {
+    startJump();
+    return;
+  }
   if (suppressNextClick) {
     suppressNextClick = false;
     return;
@@ -525,6 +560,8 @@ sprite.addEventListener('mousedown', (event) => {
 function beginDrag() {
   dragCandidate.active = true;
   stopMoving(false);
+  sim.jumpY = 0;
+  sim.jumpVelocity = 0;
   dragging = true;
   debugUntil = 0;
   sprite.classList.add('is-dragging');
