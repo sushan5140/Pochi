@@ -73,6 +73,9 @@ const SHORT_TRIP_MIN_FACTOR = 0.45;
 // M1.2 L4: bounded, on-demand jump; vertical displacement is visual-only.
 const JUMP_VELOCITY_PX_S = -220;
 const JUMP_GRAVITY_PX_S2 = 750;
+// M1.2 L5: brief, damped landing recovery (no extra screen movement).
+const LANDING_RECOVERY_S = 0.28;
+const LANDING_SQUASH = 0.12;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -127,6 +130,7 @@ const sim = {
   currentSpeed: 0,
   jumpY: 0,
   jumpVelocity: 0,
+  landingTime: 0,
   turning: false,
   heading: 0,
   turnTarget: 0,
@@ -181,6 +185,7 @@ function faceHeading(angle) {
 
 function startJump() {
   if (dragging || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
+  sim.landingTime = 0;
   sim.jumpVelocity = JUMP_VELOCITY_PX_S;
   ensureLoop();
   return true;
@@ -194,7 +199,15 @@ function updateJump(dt) {
   if (sim.jumpY >= 0) {
     sim.jumpY = 0;
     sim.jumpVelocity = 0;
+    sim.landingTime = LANDING_RECOVERY_S;
   }
+}
+
+function landingScale() {
+  if (sim.landingTime <= 0) return { x: 1, y: 1 };
+  const progress = 1 - sim.landingTime / LANDING_RECOVERY_S;
+  const damped = Math.sin(Math.PI * progress) * Math.exp(-3 * progress);
+  return { x: 1 + LANDING_SQUASH * damped, y: 1 - LANDING_SQUASH * damped };
 }
 
 function stopMoving(reachedTarget) {
@@ -277,10 +290,16 @@ function render(now) {
   // in unmirrored screen space rather than being flipped along with her.
   const flip = (sim.walkSet === 'side' && sim.facingLeft) ? 'scaleX(-1)' : '';
   const gait = gaitOffset();
-  const spriteTransform = (gait.x || gait.y)
-    ? `translate(${gait.x.toFixed(2)}px, ${gait.y.toFixed(2)}px) ${flip}`.trim()
-    : flip;
+  const landing = landingScale();
+  const recovery = sim.landingTime > 0
+    ? `scale(${landing.x.toFixed(4)}, ${landing.y.toFixed(4)})` : '';
+  // Scale is centered at the feet by anchoring the transform origin.
+  const spriteTransform = [
+    (gait.x || gait.y) ? `translate(${gait.x.toFixed(2)}px, ${gait.y.toFixed(2)}px)` : '',
+    recovery, flip
+  ].filter(Boolean).join(' ');
   if (spriteTransform !== lastSpriteTransform) {
+    sprite.style.transformOrigin = '50% 100%';
     sprite.style.transform = spriteTransform;
     lastSpriteTransform = spriteTransform;
   }
@@ -291,7 +310,7 @@ function render(now) {
 // compositor redraw the whole screen 60x a second even when she's stood
 // still — which is most of the time, and cost ~26% of a core.
 function isAnimating() {
-  return sim.moving || sim.jumpVelocity !== 0 || sim.jumpY !== 0 || dragging || performance.now() < debugUntil;
+  return sim.moving || sim.jumpVelocity !== 0 || sim.jumpY !== 0 || sim.landingTime > 0 || dragging || performance.now() < debugUntil;
 }
 
 function ensureLoop() {
@@ -372,6 +391,7 @@ function loop(now) {
   }
 
   if (!dragging) updateJump(dt);
+  if (sim.landingTime > 0) sim.landingTime = Math.max(0, sim.landingTime - dt);
   render(now);
 
   if (isAnimating()) {
@@ -422,6 +442,7 @@ function applyState(data) {
     sim.jumpY = 0;
     sim.jumpVelocity = 0;
   }
+  sim.landingTime = 0;
 
   if (data.place) {
     sim.x = data.place.x;
@@ -562,6 +583,7 @@ function beginDrag() {
   stopMoving(false);
   sim.jumpY = 0;
   sim.jumpVelocity = 0;
+  sim.landingTime = 0;
   dragging = true;
   debugUntil = 0;
   sprite.classList.add('is-dragging');
