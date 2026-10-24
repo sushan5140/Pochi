@@ -76,6 +76,11 @@ const JUMP_GRAVITY_PX_S2 = 750;
 // M1.2 L5: brief, damped landing recovery (no extra screen movement).
 const LANDING_RECOVERY_S = 0.28;
 const LANDING_SQUASH = 0.12;
+// M1.3 L7: gentle bounded momentum after dragging, before IPC dragEnd.
+const GLIDE_MAX_SPEED = 260;
+const GLIDE_DECELERATION = 900;
+const GLIDE_MIN_SPEED = 35;
+const GLIDE_SAMPLE_MAX_AGE_MS = 90;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -131,6 +136,9 @@ const sim = {
   jumpY: 0,
   jumpVelocity: 0,
   landingTime: 0,
+  glideVX: 0,
+  glideVY: 0,
+  gliding: false,
   turning: false,
   heading: 0,
   turnTarget: 0,
@@ -208,6 +216,33 @@ function landingScale() {
   const progress = 1 - sim.landingTime / LANDING_RECOVERY_S;
   const damped = Math.sin(Math.PI * progress) * Math.exp(-3 * progress);
   return { x: 1 + LANDING_SQUASH * damped, y: 1 - LANDING_SQUASH * damped };
+}
+
+function finishGlide() {
+  if (!sim.gliding) return;
+  sim.gliding = false;
+  sim.glideVX = 0;
+  sim.glideVY = 0;
+  window.pochi.dragEnd({ x: sim.x, y: sim.y });
+}
+
+function updateGlide(dt) {
+  if (!sim.gliding) return;
+  const speed = Math.hypot(sim.glideVX, sim.glideVY);
+  if (speed <= GLIDE_MIN_SPEED) { finishGlide(); return; }
+  const nextSpeed = Math.max(0, speed - GLIDE_DECELERATION * dt);
+  const distance = (speed + nextSpeed) * 0.5 * dt;
+  const boundX = Math.max(0, window.innerWidth - 144);
+  const boundY = Math.max(0, window.innerHeight - 144);
+  const nx = Math.min(boundX, Math.max(0, sim.x + sim.glideVX / speed * distance));
+  const ny = Math.min(boundY, Math.max(0, sim.y + sim.glideVY / speed * distance));
+  const collided = nx !== sim.x + sim.glideVX / speed * distance ||
+    ny !== sim.y + sim.glideVY / speed * distance;
+  sim.x = nx;
+  sim.y = ny;
+  sim.glideVX *= nextSpeed / speed;
+  sim.glideVY *= nextSpeed / speed;
+  if (collided || nextSpeed <= GLIDE_MIN_SPEED) finishGlide();
 }
 
 function stopMoving(reachedTarget) {
@@ -310,7 +345,7 @@ function render(now) {
 // compositor redraw the whole screen 60x a second even when she's stood
 // still — which is most of the time, and cost ~26% of a core.
 function isAnimating() {
-  return sim.moving || sim.jumpVelocity !== 0 || sim.jumpY !== 0 || sim.landingTime > 0 || dragging || performance.now() < debugUntil;
+  return sim.moving || sim.gliding || sim.jumpVelocity !== 0 || sim.jumpY !== 0 || sim.landingTime > 0 || dragging || performance.now() < debugUntil;
 }
 
 function ensureLoop() {
@@ -391,6 +426,7 @@ function loop(now) {
   }
 
   if (!dragging) updateJump(dt);
+  if (sim.gliding) updateGlide(dt);
   if (sim.landingTime > 0) sim.landingTime = Math.max(0, sim.landingTime - dt);
   render(now);
 
@@ -581,7 +617,10 @@ sprite.addEventListener('mousedown', (event) => {
 });
 
 function beginDrag() {
+  finishGlide();
   dragCandidate.active = true;
+  dragCandidate.lastSample = { x: sim.x, y: sim.y, time: performance.now() };
+  dragCandidate.velocity = { x: 0, y: 0 };
   stopMoving(false);
   sim.jumpY = 0;
   sim.jumpVelocity = 0;
@@ -615,8 +654,22 @@ function onDragMove(event) {
   }
 
   // Written straight into the simulation; the loop renders it next frame.
-  sim.x = event.clientX - dragCandidate.grabOffsetX;
-  sim.y = event.clientY - dragCandidate.grabOffsetY;
+  const nextX = event.clientX - dragCandidate.grabOffsetX;
+  const nextY = event.clientY - dragCandidate.grabOffsetY;
+  const now = performance.now();
+  const previous = dragCandidate.lastSample;
+  const elapsed = now - previous.time;
+  if (elapsed >= 8 && elapsed <= GLIDE_SAMPLE_MAX_AGE_MS) {
+    dragCandidate.velocity = {
+      x: (nextX - previous.x) * 1000 / elapsed,
+      y: (nextY - previous.y) * 1000 / elapsed
+    };
+  } else {
+    dragCandidate.velocity = { x: 0, y: 0 };
+  }
+  dragCandidate.lastSample = { x: nextX, y: nextY, time: now };
+  sim.x = nextX;
+  sim.y = nextY;
 }
 
 function onDragUp() {
@@ -627,7 +680,17 @@ function onDragUp() {
     suppressNextClick = true;
     dragging = false;
     sprite.classList.remove('is-dragging');
-    window.pochi.dragEnd({ x: sim.x, y: sim.y });
+    const age = performance.now() - dragCandidate.lastSample.time;
+    const speed = Math.hypot(dragCandidate.velocity.x, dragCandidate.velocity.y);
+    const factor = speed > GLIDE_MAX_SPEED ? GLIDE_MAX_SPEED / speed : 1;
+    if (age <= GLIDE_SAMPLE_MAX_AGE_MS && speed >= GLIDE_MIN_SPEED) {
+      sim.glideVX = dragCandidate.velocity.x * factor;
+      sim.glideVY = dragCandidate.velocity.y * factor;
+      sim.gliding = true;
+      ensureLoop();
+    } else {
+      window.pochi.dragEnd({ x: sim.x, y: sim.y });
+    }
     scheduleIdleRefresh();
   }
 
