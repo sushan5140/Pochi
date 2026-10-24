@@ -63,3 +63,28 @@ test('acceleration begins from rest and ramps up without exceeding the gait cap'
   h.advance(20);
   assert.ok(h.sample('sim.currentSpeed') <= 130, 'normal speed cap preserved');
 });
+
+test('braking lowers speed near target and finishes exactly on the goal', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 210, y: 0 }, gait: 'normal' });
+  const speeds = [];
+  let finished = false;
+  for (let i = 0; i < 250; i++) {
+    if (!h.sample('sim.moving')) { finished = true; break; }
+    h.advance();
+    speeds.push(h.sample('sim.currentSpeed'));
+  }
+  assert.ok(finished, 'walk should finish');
+  assert.ok(speeds.some(v => v >= 120), 'walk reaches cruise speed');
+  assert.ok(speeds.some((v, i) => i > 10 && v > 0 && v < 100),
+    'speed drops during the final approach');
+  assert.equal(h.sample('sim.x'), 210, 'no overshoot');
+  assert.equal(h.sample('sim.currentSpeed'), 0, 'rest on arrival');
+});
+
+test('sleepy gait obeys the lower speed cap on a long walk', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 900, y: 0 }, gait: 'sleepy' });
+  h.advance(30);
+  assert.ok(h.sample('sim.currentSpeed') <= 70);
+});
