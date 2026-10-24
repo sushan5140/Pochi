@@ -10,6 +10,7 @@ function harness() {
   const callbacks = [];
   let tick = 0;
   let stateHandler;
+  const dragEnds = [];
   const element = () => ({
     style: {},
     classList: { add() {}, remove() {} },
@@ -22,13 +23,15 @@ function harness() {
   const context = vm.createContext({
     document: { getElementById: key => dom[key] },
     window: {
+      innerWidth: 800,
+      innerHeight: 600,
       addEventListener() {},
       removeEventListener() {},
       pochi: {
         onState: cb => { stateHandler = cb; },
         settled() {},
         setIgnoreMouse() {},
-        dragStart() {}, dragEnd() {}
+        dragStart() {}, dragEnd: point => dragEnds.push(point)
       },
       pochiSound: { play() {} }
     },
@@ -48,7 +51,7 @@ function harness() {
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance };
+  return { send: data => stateHandler(data), sample, advance, dragEnds };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -199,4 +202,33 @@ test('teleports cancel jump offset and reset moving speed', () => {
   assert.equal(h.sample('sim.jumpVelocity'), 0);
   assert.equal(h.sample('sim.x'), 80);
   assert.equal(h.sample('sim.y'), 45);
+});
+
+test('release momentum dissipates and dragEnd reports the final resting position', () => {
+  const h = harness();
+  h.sample('sim.x = 150; sim.y = 100; sim.glideVX = 220; sim.glideVY = 0; sim.gliding = true; ensureLoop()');
+  h.advance(20);
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.ok(h.sample('sim.x') > 150, 'glide should move Pochi forward');
+  assert.ok(h.sample('sim.x') < 190, 'friction limits total displacement');
+  assert.equal(h.dragEnds.length, 1, 'only one dragEnd message');
+  assert.equal(h.dragEnds[0].x, h.sample('sim.x'), 'main receives final position');
+});
+
+test('glide stops at screen boundary instead of escaping the overlay', () => {
+  const h = harness();
+  h.sample('sim.x = 650; sim.y = 100; sim.glideVX = 260; sim.glideVY = 0; sim.gliding = true; ensureLoop()');
+  h.advance(8);
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.sample('sim.x'), 656);
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('canceling glide sends completion once, and idle does not animate indefinitely', () => {
+  const h = harness();
+  h.sample('sim.x = 100; sim.glideVX = 200; sim.glideVY = 0; sim.gliding = true; ensureLoop()');
+  h.sample('finishGlide()');
+  h.sample('finishGlide()');
+  assert.equal(h.dragEnds.length, 1);
+  assert.equal(h.sample('sim.gliding'), false);
 });
