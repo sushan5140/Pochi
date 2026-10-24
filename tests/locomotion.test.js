@@ -116,3 +116,29 @@ test('adaptive speed respects the sleepy gait cap', () => {
   assert.ok(h.sample('sim.cruiseSpeed') < 70);
   assert.ok(h.sample('sim.cruiseSpeed') > 0);
 });
+
+test('gravity jump rises, falls, and returns to the original ground position', () => {
+  const h = harness();
+  assert.equal(h.sample('startJump()'), true);
+  assert.equal(h.sample('startJump()'), false, 'no double jump');
+  let apex = 0;
+  for (let i = 0; i < 90 && (h.sample('sim.jumpVelocity') !== 0 || h.sample('sim.jumpY') !== 0); i++) {
+    h.advance();
+    apex = Math.min(apex, h.sample('sim.jumpY'));
+  }
+  assert.ok(apex < -15, 'jump rises off the ground');
+  assert.equal(h.sample('sim.jumpY'), 0, 'no ground penetration');
+  assert.equal(h.sample('sim.jumpVelocity'), 0, 'velocity reset on landing');
+  assert.equal(h.sample('sim.y'), 0, 'the underlying ground coordinate is unchanged');
+});
+
+test('movement and dragging cannot initiate overlapping jumps', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 300, y: 0 }, gait: 'normal' });
+  assert.equal(h.sample('startJump()'), false);
+  h.send({ state: 'idle', pose: null });
+  assert.equal(h.sample('startJump()'), true);
+  h.send({ state: 'nagging_water', pose: 'water_bottle' });
+  assert.equal(h.sample('sim.jumpY'), 0);
+  assert.equal(h.sample('sim.jumpVelocity'), 0);
+});
