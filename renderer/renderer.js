@@ -62,6 +62,10 @@ const SPEEDS = { normal: 130, sleepy: 70 };
 // Keep stride frames distance-based, so slowing down also slows the feet.
 const WALK_ACCEL_PX_S2 = 320;
 const WALK_BRAKE_PX_S2 = 440;
+// M1.1 L2: stop and pivot on major mid-walk retargets, avoiding abrupt U-turns.
+const SHARP_TURN_RAD = Math.PI / 3;
+const TURN_RATE_RAD_S = Math.PI * 2; // 180 degrees in about half a second
+const TURN_EPSILON_RAD = 0.025;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -113,6 +117,9 @@ const sim = {
   moving: false,
   speed: SPEEDS.normal,
   currentSpeed: 0,
+  turning: false,
+  heading: 0,
+  turnTarget: 0,
   distanceWalked: 0,
   walkSet: 'side',
   facingLeft: false
@@ -149,10 +156,19 @@ function updateViewSet(ux, uy) {
   }
 }
 
+function shortestAngle(from, to) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function faceHeading(angle) {
+  updateViewSet(Math.cos(angle), Math.sin(angle));
+}
+
 function stopMoving(reachedTarget) {
   if (!sim.moving) return;
   sim.moving = false;
   sim.currentSpeed = 0;
+  sim.turning = false;
   sim.distanceWalked = 0;
   window.pochi.settled({ x: sim.x, y: sim.y, reachedTarget });
 }
@@ -163,6 +179,9 @@ function stopMoving(reachedTarget) {
 function spriteSrcFor(now) {
   if (now < debugUntil) {
     return assetPath('expressions', DEBUG_EXPRESSIONS[debugIndex]);
+  }
+  if (sim.turning) {
+    return assetPath('walk_cycle', WALK_SETS[sim.walkSet][0]);
   }
   if (sim.moving) {
     const stride = STRIDE_PX[sim.walkSet];
@@ -268,6 +287,23 @@ function loop(now) {
   lastFrameTime = now;
 
   if (sim.moving && !dragging) {
+    if (sim.turning) {
+      // Stop before pivoting; turning in place never advances walk frames.
+      sim.currentSpeed = Math.max(0, sim.currentSpeed - WALK_BRAKE_PX_S2 * dt);
+      if (sim.currentSpeed <= 0) {
+        const difference = shortestAngle(sim.heading, sim.turnTarget);
+        const turnStep = Math.max(-TURN_RATE_RAD_S * dt,
+          Math.min(TURN_RATE_RAD_S * dt, difference));
+        sim.heading += turnStep;
+        faceHeading(sim.heading);
+        if (Math.abs(difference) <= TURN_EPSILON_RAD ||
+            Math.abs(turnStep - difference) < 0.000001) {
+          sim.heading = sim.turnTarget;
+          faceHeading(sim.heading);
+          sim.turning = false;
+        }
+      }
+    } else {
     const dx = sim.targetX - sim.x;
     const dy = sim.targetY - sim.y;
     const remaining = Math.hypot(dx, dy);
@@ -290,6 +326,7 @@ function loop(now) {
       sim.x += ux * step;
       sim.y += uy * step;
       sim.distanceWalked += step;
+      sim.heading = Math.atan2(uy, ux);
       updateViewSet(ux, uy);
 
       if (step >= remaining || remaining - step < 0.5) {
@@ -297,6 +334,7 @@ function loop(now) {
         sim.y = sim.targetY;
         stopMoving(true);
       }
+    }
     }
   }
 
@@ -354,6 +392,20 @@ function applyState(data) {
   }
 
   if (data.target) {
+    const dx = data.target.x - sim.x;
+    const dy = data.target.y - sim.y;
+    if (sim.moving && Math.hypot(dx, dy) > 0.5) {
+      const desiredHeading = Math.atan2(dy, dx);
+      const difference = Math.abs(shortestAngle(sim.heading, desiredHeading));
+      // A sharp retarget becomes a brief stop-and-pivot. Slight corrections
+      // continue normally, avoiding jitter near the 60-degree threshold.
+      if (difference >= SHARP_TURN_RAD) {
+        sim.turning = true;
+        sim.turnTarget = desiredHeading;
+      } else if (sim.turning) {
+        sim.turnTarget = desiredHeading;
+      }
+    }
     sim.targetX = data.target.x;
     sim.targetY = data.target.y;
     sim.speed = SPEEDS[data.gait] || SPEEDS.normal;
