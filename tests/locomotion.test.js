@@ -164,3 +164,39 @@ test('new state cancels landing recovery to avoid overlapping animations', () =>
   h.send({ state: 'nagging_water', pose: 'water_bottle' });
   assert.equal(h.sample('sim.landingTime'), 0);
 });
+
+test('redundant idle updates preserve jump and landing but interruptions cancel them', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  assert.equal(h.sample('startJump()'), true);
+  h.advance(3);
+  const before = h.sample('sim.jumpY');
+  assert.ok(before < 0);
+  h.send({ state: 'idle', pose: null, expression: 'happy' });
+  assert.equal(h.sample('sim.jumpY'), before, 'ordinary idle refresh should not teleport jump');
+  h.send({ state: 'walking', target: { x: 140, y: 0 } });
+  assert.equal(h.sample('sim.jumpY'), 0, 'new walking target cancels jump');
+  assert.equal(h.sample('sim.jumpVelocity'), 0);
+});
+
+test('repeated landing-state refresh does not cancel recovery', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.landingTime = LANDING_RECOVERY_S');
+  h.send({ state: 'idle', pose: null, expression: 'happy' });
+  assert.equal(h.sample('sim.landingTime'), h.sample('LANDING_RECOVERY_S'));
+  h.send({ state: 'sleeping', pose: null });
+  assert.equal(h.sample('sim.landingTime'), 0);
+});
+
+test('teleports cancel jump offset and reset moving speed', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('startJump()');
+  h.advance(3);
+  h.send({ state: 'idle', place: { x: 80, y: 45 } });
+  assert.equal(h.sample('sim.jumpY'), 0);
+  assert.equal(h.sample('sim.jumpVelocity'), 0);
+  assert.equal(h.sample('sim.x'), 80);
+  assert.equal(h.sample('sim.y'), 45);
+});
