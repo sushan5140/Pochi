@@ -419,6 +419,7 @@ function scheduleIdleRefresh() {
 }
 
 function applyState(data) {
+  const priorState = latest.state;
   latest = data;
   debugUntil = 0; // a real state update always beats the debug preview
 
@@ -437,12 +438,13 @@ function applyState(data) {
   }
 
   if (dragging) return; // user has hold of her; ignore positioning intent
-  // State transitions take priority over an optional cosmetic jump.
-  if (sim.jumpY !== 0 || sim.jumpVelocity !== 0) {
+  // Redundant updates in the same state must not cancel an in-flight jump
+  // or the landing recovery. Only a real state/position change interrupts it.
+  if (data.state !== priorState || data.place || data.target) {
     sim.jumpY = 0;
     sim.jumpVelocity = 0;
+    sim.landingTime = 0;
   }
-  sim.landingTime = 0;
 
   if (data.place) {
     sim.x = data.place.x;
@@ -493,12 +495,12 @@ scheduleIdleRefresh();
 sprite.addEventListener('click', (event) => {
   // Explicit opt-in: Ctrl+click performs one small jump, leaving the normal
   // click/double-click, nag resolution, and mini-game semantics untouched.
-  if (event.ctrlKey && latest.state === 'idle') {
-    startJump();
-    return;
-  }
   if (suppressNextClick) {
     suppressNextClick = false;
+    return;
+  }
+  if (event.ctrlKey && latest.state === 'idle') {
+    startJump();
     return;
   }
 
