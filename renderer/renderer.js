@@ -225,6 +225,13 @@ function landingScale() {
   return { x: 1 + LANDING_SQUASH * damped, y: 1 - LANDING_SQUASH * damped };
 }
 
+// Virtual desktop coordinates are local to the fullscreen overlay.
+function clampToOverlay(x, y) {
+  const maxX = Math.max(0, window.innerWidth - 144);
+  const maxY = Math.max(0, window.innerHeight - 144);
+  return { x: Math.min(maxX, Math.max(0, x)), y: Math.min(maxY, Math.max(0, y)) };
+}
+
 function finishGlide() {
   if (!sim.gliding) return;
   sim.gliding = false;
@@ -242,12 +249,11 @@ function updateGlide(dt) {
   const deceleration = sim.throwing ? THROW_DECELERATION : GLIDE_DECELERATION;
   const nextSpeed = Math.max(0, speed - deceleration * dt);
   const distance = (speed + nextSpeed) * 0.5 * dt;
-  const boundX = Math.max(0, window.innerWidth - 144);
-  const boundY = Math.max(0, window.innerHeight - 144);
   const proposedX = sim.x + sim.glideVX / speed * distance;
   const proposedY = sim.y + sim.glideVY / speed * distance;
-  const nx = Math.min(boundX, Math.max(0, proposedX));
-  const ny = Math.min(boundY, Math.max(0, proposedY));
+  const bounded = clampToOverlay(proposedX, proposedY);
+  const nx = bounded.x;
+  const ny = bounded.y;
   const hitX = nx !== proposedX;
   const hitY = ny !== proposedY;
   sim.x = nx;
@@ -509,15 +515,19 @@ function applyState(data) {
   }
 
   if (data.place) {
-    sim.x = data.place.x;
-    sim.y = data.place.y;
+    finishGlide();
+    const position = clampToOverlay(data.place.x, data.place.y);
+    sim.x = position.x;
+    sim.y = position.y;
     sim.currentSpeed = 0;
     stopMoving(false);
   }
 
   if (data.target) {
-    const dx = data.target.x - sim.x;
-    const dy = data.target.y - sim.y;
+    finishGlide();
+    const target = clampToOverlay(data.target.x, data.target.y);
+    const dx = target.x - sim.x;
+    const dy = target.y - sim.y;
     if (sim.moving && Math.hypot(dx, dy) > 0.5) {
       const desiredHeading = Math.atan2(dy, dx);
       const difference = Math.abs(shortestAngle(sim.heading, desiredHeading));
@@ -530,8 +540,8 @@ function applyState(data) {
         sim.turnTarget = desiredHeading;
       }
     }
-    sim.targetX = data.target.x;
-    sim.targetY = data.target.y;
+    sim.targetX = target.x;
+    sim.targetY = target.y;
     sim.speed = SPEEDS[data.gait] || SPEEDS.normal;
     sim.cruiseSpeed = adaptiveCruiseSpeed(Math.hypot(dx, dy), sim.speed);
     // distanceWalked deliberately carries over on a retarget, so being
@@ -544,6 +554,21 @@ function applyState(data) {
     scheduleIdleRefresh();
   }
 }
+
+// Resizing the virtual desktop (dock/monitor changes) cannot strand Pochi
+// outside the updated overlay. Finish a throw once, then restore in-bounds.
+window.addEventListener('resize', () => {
+  if (sim.gliding) finishGlide();
+  const bounded = clampToOverlay(sim.x, sim.y);
+  sim.x = bounded.x;
+  sim.y = bounded.y;
+  if (sim.moving) {
+    const target = clampToOverlay(sim.targetX, sim.targetY);
+    sim.targetX = target.x;
+    sim.targetY = target.y;
+  }
+  render(performance.now());
+});
 
 window.pochi.onState(applyState);
 render(performance.now());
@@ -694,8 +719,9 @@ function onDragMove(event) {
     dragCandidate.velocity = { x: 0, y: 0 };
   }
   dragCandidate.lastSample = { x: nextX, y: nextY, time: now };
-  sim.x = nextX;
-  sim.y = nextY;
+  const bounded = clampToOverlay(nextX, nextY);
+  sim.x = bounded.x;
+  sim.y = bounded.y;
 }
 
 function onDragUp() {
@@ -703,6 +729,9 @@ function onDragUp() {
   window.removeEventListener('mouseup', onDragUp);
 
   if (dragCandidate && dragCandidate.active) {
+    const bounded = clampToOverlay(sim.x, sim.y);
+    sim.x = bounded.x;
+    sim.y = bounded.y;
     suppressNextClick = true;
     dragging = false;
     sprite.classList.remove('is-dragging');
