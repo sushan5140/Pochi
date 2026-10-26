@@ -11,6 +11,7 @@ function harness() {
   let tick = 0;
   let stateHandler;
   const dragEnds = [];
+  const windowHandlers = {};
   const element = () => ({
     style: {},
     classList: { add() {}, remove() {} },
@@ -25,7 +26,7 @@ function harness() {
     window: {
       innerWidth: 800,
       innerHeight: 600,
-      addEventListener() {},
+      addEventListener: (name, fn) => { windowHandlers[name] = fn; },
       removeEventListener() {},
       pochi: {
         onState: cb => { stateHandler = cb; },
@@ -51,7 +52,7 @@ function harness() {
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance, dragEnds };
+  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -262,4 +263,34 @@ test('ordinary glide does not receive throw-speed or bounce mechanics', () => {
   h.advance(3);
   assert.equal(h.sample('sim.gliding'), false);
   assert.equal(h.dragEnds.length, 1);
+});
+
+test('out-of-bounds drag and walking targets clamp to the overlay', () => {
+  const h = harness();
+  h.send({ state: 'idle', place: { x: -80, y: 3000 } });
+  assert.equal(h.sample('sim.x'), 0);
+  assert.equal(h.sample('sim.y'), 456);
+  h.send({ state: 'walking', target: { x: 3000, y: -20 } });
+  assert.equal(h.sample('sim.targetX'), 656);
+  assert.equal(h.sample('sim.targetY'), 0);
+});
+
+test('desktop resizing clamps positions and finishes an active throw once', () => {
+  const h = harness();
+  h.sample('sim.x = 800; sim.y = -100; sim.glideVX = 200; sim.gliding = true');
+  h.windowHandlers.resize();
+  assert.equal(h.sample('sim.x'), 656);
+  assert.equal(h.sample('sim.y'), 0);
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+  h.windowHandlers.resize();
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('dragging cannot leave the overlay even when pointer does', () => {
+  const h = harness();
+  h.sample('dragCandidate = { active: true, grabOffsetX: 10, grabOffsetY: 10, lastSample: { x: 0, y: 0, time: 0 }, velocity: { x: 0, y: 0 } }');
+  h.sample('onDragMove({clientX: -1000, clientY: 2000})');
+  assert.equal(h.sample('sim.x'), 0);
+  assert.equal(h.sample('sim.y'), 456);
 });
