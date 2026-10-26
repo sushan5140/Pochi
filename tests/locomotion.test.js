@@ -232,3 +232,34 @@ test('canceling glide sends completion once, and idle does not animate indefinit
   assert.equal(h.dragEnds.length, 1);
   assert.equal(h.sample('sim.gliding'), false);
 });
+
+test('fast throw slows under friction and reports one final dragEnd', () => {
+  const h = harness();
+  h.sample('sim.x = 150; sim.y = 100; sim.glideVX = 500; sim.glideVY = 0; sim.throwing = true; sim.gliding = true; ensureLoop()');
+  h.advance(2);
+  assert.ok(h.sample('sim.glideVX') < 500, 'throw slows due to friction');
+  for (let i = 0; i < 90 && h.sample('sim.gliding'); i++) h.advance();
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.sample('sim.throwing'), false);
+  assert.equal(h.dragEnds.length, 1);
+  assert.equal(h.dragEnds[0].x, h.sample('sim.x'));
+});
+
+test('fast throw rebounds at most once and never leaves the display', () => {
+  const h = harness();
+  h.sample('sim.x = 651; sim.y = 100; sim.glideVX = 500; sim.glideVY = 0; sim.throwing = true; sim.gliding = true; ensureLoop()');
+  h.advance();
+  assert.equal(h.sample('sim.throwBounces'), 1);
+  assert.ok(h.sample('sim.glideVX') < 0, 'velocity reverses after impact');
+  for (let i = 0; i < 90 && h.sample('sim.gliding'); i++) h.advance();
+  assert.ok(h.sample('sim.x') >= 0 && h.sample('sim.x') <= 656);
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('ordinary glide does not receive throw-speed or bounce mechanics', () => {
+  const h = harness();
+  h.sample('sim.x = 651; sim.y = 100; sim.glideVX = 220; sim.glideVY = 0; sim.throwing = false; sim.gliding = true; ensureLoop()');
+  h.advance(3);
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+});
