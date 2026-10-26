@@ -58,6 +58,34 @@ const GAIT_BOB_PX = { side: 0, front: 0, back: 3 };
 const GAIT_SWAY_PX = { side: 0, front: 0, back: 1.5 };
 
 const SPEEDS = { normal: 130, sleepy: 70 };
+// M1.1 L1: speed ramps instead of snapping immediately to walking pace.
+// Keep stride frames distance-based, so slowing down also slows the feet.
+const WALK_ACCEL_PX_S2 = 320;
+const WALK_BRAKE_PX_S2 = 440;
+// M1.1 L2: stop and pivot on major mid-walk retargets, avoiding abrupt U-turns.
+const SHARP_TURN_RAD = Math.PI / 3;
+const TURN_RATE_RAD_S = Math.PI * 2; // 180 degrees in about half a second
+const TURN_EPSILON_RAD = 0.025;
+// M1.1 L3: shorter trips are strolls, not full-speed sprints. Long trips
+// retain their original gait cap; sleepy mode keeps its stricter cap.
+const SHORT_TRIP_PX = 120;
+const SHORT_TRIP_MIN_FACTOR = 0.45;
+// M1.2 L4: bounded, on-demand jump; vertical displacement is visual-only.
+const JUMP_VELOCITY_PX_S = -220;
+const JUMP_GRAVITY_PX_S2 = 750;
+// M1.2 L5: brief, damped landing recovery (no extra screen movement).
+const LANDING_RECOVERY_S = 0.28;
+const LANDING_SQUASH = 0.12;
+// M1.3 L7: gentle bounded momentum after dragging, before IPC dragEnd.
+const GLIDE_MAX_SPEED = 260;
+const GLIDE_DECELERATION = 900;
+const GLIDE_MIN_SPEED = 35;
+const GLIDE_SAMPLE_MAX_AGE_MS = 90;
+// M1.3 L8: deliberate fast throws travel further and rebound softly once.
+const THROW_TRIGGER_SPEED = 420;
+const THROW_MAX_SPEED = 520;
+const THROW_DECELERATION = 700;
+const THROW_BOUNCE_FACTOR = 0.32;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -108,6 +136,19 @@ const sim = {
   targetY: 0,
   moving: false,
   speed: SPEEDS.normal,
+  cruiseSpeed: SPEEDS.normal,
+  currentSpeed: 0,
+  jumpY: 0,
+  jumpVelocity: 0,
+  landingTime: 0,
+  glideVX: 0,
+  glideVY: 0,
+  gliding: false,
+  throwing: false,
+  throwBounces: 0,
+  turning: false,
+  heading: 0,
+  turnTarget: 0,
   distanceWalked: 0,
   walkSet: 'side',
   facingLeft: false
@@ -144,9 +185,103 @@ function updateViewSet(ux, uy) {
   }
 }
 
+function adaptiveCruiseSpeed(distance, gaitSpeed) {
+  const fraction = Math.min(1, Math.max(0, distance / SHORT_TRIP_PX));
+  return gaitSpeed * (SHORT_TRIP_MIN_FACTOR + (1 - SHORT_TRIP_MIN_FACTOR) * fraction);
+}
+
+function shortestAngle(from, to) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function faceHeading(angle) {
+  updateViewSet(Math.cos(angle), Math.sin(angle));
+}
+
+function startJump() {
+  if (dragging || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
+  sim.landingTime = 0;
+  sim.jumpVelocity = JUMP_VELOCITY_PX_S;
+  ensureLoop();
+  return true;
+}
+
+function updateJump(dt) {
+  if (sim.jumpVelocity === 0 && sim.jumpY === 0) return;
+  const nextVelocity = sim.jumpVelocity + JUMP_GRAVITY_PX_S2 * dt;
+  sim.jumpY += (sim.jumpVelocity + nextVelocity) * 0.5 * dt;
+  sim.jumpVelocity = nextVelocity;
+  if (sim.jumpY >= 0) {
+    sim.jumpY = 0;
+    sim.jumpVelocity = 0;
+    sim.landingTime = LANDING_RECOVERY_S;
+  }
+}
+
+function landingScale() {
+  if (sim.landingTime <= 0) return { x: 1, y: 1 };
+  const progress = 1 - sim.landingTime / LANDING_RECOVERY_S;
+  const damped = Math.sin(Math.PI * progress) * Math.exp(-3 * progress);
+  return { x: 1 + LANDING_SQUASH * damped, y: 1 - LANDING_SQUASH * damped };
+}
+
+// Virtual desktop coordinates are local to the fullscreen overlay.
+function clampToOverlay(x, y) {
+  const maxX = Math.max(0, window.innerWidth - 144);
+  const maxY = Math.max(0, window.innerHeight - 144);
+  return { x: Math.min(maxX, Math.max(0, x)), y: Math.min(maxY, Math.max(0, y)) };
+}
+
+function finishGlide() {
+  if (!sim.gliding) return;
+  sim.gliding = false;
+  sim.throwing = false;
+  sim.throwBounces = 0;
+  sim.glideVX = 0;
+  sim.glideVY = 0;
+  window.pochi.dragEnd({ x: sim.x, y: sim.y });
+}
+
+function updateGlide(dt) {
+  if (!sim.gliding) return;
+  const speed = Math.hypot(sim.glideVX, sim.glideVY);
+  if (speed <= GLIDE_MIN_SPEED) { finishGlide(); return; }
+  const deceleration = sim.throwing ? THROW_DECELERATION : GLIDE_DECELERATION;
+  const nextSpeed = Math.max(0, speed - deceleration * dt);
+  const distance = (speed + nextSpeed) * 0.5 * dt;
+  const proposedX = sim.x + sim.glideVX / speed * distance;
+  const proposedY = sim.y + sim.glideVY / speed * distance;
+  const bounded = clampToOverlay(proposedX, proposedY);
+  const nx = bounded.x;
+  const ny = bounded.y;
+  const hitX = nx !== proposedX;
+  const hitY = ny !== proposedY;
+  sim.x = nx;
+  sim.y = ny;
+  sim.glideVX *= nextSpeed / speed;
+  sim.glideVY *= nextSpeed / speed;
+  if (hitX || hitY) {
+    if (!sim.throwing || sim.throwBounces >= 1) {
+      finishGlide();
+      return;
+    }
+    sim.throwBounces += 1;
+    if (hitX) sim.glideVX = -sim.glideVX * THROW_BOUNCE_FACTOR;
+    if (hitY) sim.glideVY = -sim.glideVY * THROW_BOUNCE_FACTOR;
+    // One soft rebound maximum; friction ends the remaining drift.
+    if (Math.hypot(sim.glideVX, sim.glideVY) <= GLIDE_MIN_SPEED) {
+      finishGlide();
+      return;
+    }
+  }
+  if (nextSpeed <= GLIDE_MIN_SPEED) finishGlide();
+}
+
 function stopMoving(reachedTarget) {
   if (!sim.moving) return;
   sim.moving = false;
+  sim.currentSpeed = 0;
+  sim.turning = false;
   sim.distanceWalked = 0;
   window.pochi.settled({ x: sim.x, y: sim.y, reachedTarget });
 }
@@ -157,6 +292,9 @@ function stopMoving(reachedTarget) {
 function spriteSrcFor(now) {
   if (now < debugUntil) {
     return assetPath('expressions', DEBUG_EXPRESSIONS[debugIndex]);
+  }
+  if (sim.turning) {
+    return assetPath('walk_cycle', WALK_SETS[sim.walkSet][0]);
   }
   if (sim.moving) {
     const stride = STRIDE_PX[sim.walkSet];
@@ -203,7 +341,7 @@ function gaitOffset() {
 }
 
 function render(now) {
-  const transform = `translate3d(${sim.x.toFixed(2)}px, ${sim.y.toFixed(2)}px, 0)`;
+  const transform = `translate3d(${sim.x.toFixed(2)}px, ${(sim.y + sim.jumpY).toFixed(2)}px, 0)`;
   if (transform !== lastTransform) {
     wrap.style.transform = transform;
     lastTransform = transform;
@@ -219,10 +357,16 @@ function render(now) {
   // in unmirrored screen space rather than being flipped along with her.
   const flip = (sim.walkSet === 'side' && sim.facingLeft) ? 'scaleX(-1)' : '';
   const gait = gaitOffset();
-  const spriteTransform = (gait.x || gait.y)
-    ? `translate(${gait.x.toFixed(2)}px, ${gait.y.toFixed(2)}px) ${flip}`.trim()
-    : flip;
+  const landing = landingScale();
+  const recovery = sim.landingTime > 0
+    ? `scale(${landing.x.toFixed(4)}, ${landing.y.toFixed(4)})` : '';
+  // Scale is centered at the feet by anchoring the transform origin.
+  const spriteTransform = [
+    (gait.x || gait.y) ? `translate(${gait.x.toFixed(2)}px, ${gait.y.toFixed(2)}px)` : '',
+    recovery, flip
+  ].filter(Boolean).join(' ');
   if (spriteTransform !== lastSpriteTransform) {
+    sprite.style.transformOrigin = '50% 100%';
     sprite.style.transform = spriteTransform;
     lastSpriteTransform = spriteTransform;
   }
@@ -233,7 +377,7 @@ function render(now) {
 // compositor redraw the whole screen 60x a second even when she's stood
 // still — which is most of the time, and cost ~26% of a core.
 function isAnimating() {
-  return sim.moving || dragging || performance.now() < debugUntil;
+  return sim.moving || sim.gliding || sim.jumpVelocity !== 0 || sim.jumpY !== 0 || sim.landingTime > 0 || dragging || performance.now() < debugUntil;
 }
 
 function ensureLoop() {
@@ -262,25 +406,60 @@ function loop(now) {
   lastFrameTime = now;
 
   if (sim.moving && !dragging) {
+    if (sim.turning) {
+      // Stop before pivoting; turning in place never advances walk frames.
+      sim.currentSpeed = Math.max(0, sim.currentSpeed - WALK_BRAKE_PX_S2 * dt);
+      if (sim.currentSpeed <= 0) {
+        const difference = shortestAngle(sim.heading, sim.turnTarget);
+        const turnStep = Math.max(-TURN_RATE_RAD_S * dt,
+          Math.min(TURN_RATE_RAD_S * dt, difference));
+        sim.heading += turnStep;
+        faceHeading(sim.heading);
+        if (Math.abs(difference) <= TURN_EPSILON_RAD ||
+            Math.abs(turnStep - difference) < 0.000001) {
+          sim.heading = sim.turnTarget;
+          faceHeading(sim.heading);
+          sim.turning = false;
+        }
+      }
+    } else {
     const dx = sim.targetX - sim.x;
     const dy = sim.targetY - sim.y;
     const remaining = Math.hypot(dx, dy);
-    const step = sim.speed * dt;
-
-    if (remaining <= step || remaining < 0.5) {
+    if (remaining < 0.5) {
       sim.x = sim.targetX;
       sim.y = sim.targetY;
       stopMoving(true);
     } else {
+      // Braking envelope: v^2 <= 2*a*distance. This makes arrival gentle
+      // while retaining the existing max normal/sleepy speeds.
+      const safeSpeed = Math.min(sim.cruiseSpeed, Math.sqrt(2 * WALK_BRAKE_PX_S2 * remaining));
+      const rate = safeSpeed < sim.currentSpeed ? WALK_BRAKE_PX_S2 : WALK_ACCEL_PX_S2;
+      const delta = rate * dt;
+      const nextSpeed = sim.currentSpeed + Math.max(-delta, Math.min(delta, safeSpeed - sim.currentSpeed));
+      const step = Math.min(remaining, (sim.currentSpeed + nextSpeed) * 0.5 * dt);
+      sim.currentSpeed = nextSpeed;
+
       const ux = dx / remaining;
       const uy = dy / remaining;
       sim.x += ux * step;
       sim.y += uy * step;
       sim.distanceWalked += step;
+      sim.heading = Math.atan2(uy, ux);
       updateViewSet(ux, uy);
+
+      if (step >= remaining || remaining - step < 0.5) {
+        sim.x = sim.targetX;
+        sim.y = sim.targetY;
+        stopMoving(true);
+      }
+    }
     }
   }
 
+  if (!dragging) updateJump(dt);
+  if (sim.gliding) updateGlide(dt);
+  if (sim.landingTime > 0) sim.landingTime = Math.max(0, sim.landingTime - dt);
   render(now);
 
   if (isAnimating()) {
@@ -308,6 +487,7 @@ function scheduleIdleRefresh() {
 }
 
 function applyState(data) {
+  const priorState = latest.state;
   latest = data;
   debugUntil = 0; // a real state update always beats the debug preview
 
@@ -326,17 +506,44 @@ function applyState(data) {
   }
 
   if (dragging) return; // user has hold of her; ignore positioning intent
+  // Redundant updates in the same state must not cancel an in-flight jump
+  // or the landing recovery. Only a real state/position change interrupts it.
+  if (data.state !== priorState || data.place || data.target) {
+    sim.jumpY = 0;
+    sim.jumpVelocity = 0;
+    sim.landingTime = 0;
+  }
 
   if (data.place) {
-    sim.x = data.place.x;
-    sim.y = data.place.y;
+    finishGlide();
+    const position = clampToOverlay(data.place.x, data.place.y);
+    sim.x = position.x;
+    sim.y = position.y;
+    sim.currentSpeed = 0;
     stopMoving(false);
   }
 
   if (data.target) {
-    sim.targetX = data.target.x;
-    sim.targetY = data.target.y;
+    finishGlide();
+    const target = clampToOverlay(data.target.x, data.target.y);
+    const dx = target.x - sim.x;
+    const dy = target.y - sim.y;
+    if (sim.moving && Math.hypot(dx, dy) > 0.5) {
+      const desiredHeading = Math.atan2(dy, dx);
+      const difference = Math.abs(shortestAngle(sim.heading, desiredHeading));
+      // A sharp retarget becomes a brief stop-and-pivot. Slight corrections
+      // continue normally, avoiding jitter near the 60-degree threshold.
+      if (difference >= SHARP_TURN_RAD) {
+        sim.turning = true;
+        sim.turnTarget = desiredHeading;
+      } else if (sim.turning) {
+        sim.turnTarget = desiredHeading;
+      }
+    }
+    sim.targetX = target.x;
+    sim.targetY = target.y;
     sim.speed = SPEEDS[data.gait] || SPEEDS.normal;
+    sim.cruiseSpeed = adaptiveCruiseSpeed(Math.hypot(dx, dy), sim.speed);
     // distanceWalked deliberately carries over on a retarget, so being
     // redirected mid-stride continues the gait instead of hitching.
     sim.moving = true;
@@ -348,6 +555,21 @@ function applyState(data) {
   }
 }
 
+// Resizing the virtual desktop (dock/monitor changes) cannot strand Pochi
+// outside the updated overlay. Finish a throw once, then restore in-bounds.
+window.addEventListener('resize', () => {
+  if (sim.gliding) finishGlide();
+  const bounded = clampToOverlay(sim.x, sim.y);
+  sim.x = bounded.x;
+  sim.y = bounded.y;
+  if (sim.moving) {
+    const target = clampToOverlay(sim.targetX, sim.targetY);
+    sim.targetX = target.x;
+    sim.targetY = target.y;
+  }
+  render(performance.now());
+});
+
 window.pochi.onState(applyState);
 render(performance.now());
 scheduleIdleRefresh();
@@ -357,9 +579,15 @@ scheduleIdleRefresh();
 // expression. The preview is a timestamp the render function reads, not a
 // timer that suspends anything — she keeps walking underneath it and the
 // walk frames resume exactly in step when it expires.
-sprite.addEventListener('click', () => {
+sprite.addEventListener('click', (event) => {
+  // Explicit opt-in: Ctrl+click performs one small jump, leaving the normal
+  // click/double-click, nag resolution, and mini-game semantics untouched.
   if (suppressNextClick) {
     suppressNextClick = false;
+    return;
+  }
+  if (event.ctrlKey && latest.state === 'idle') {
+    startJump();
     return;
   }
 
@@ -440,8 +668,14 @@ sprite.addEventListener('mousedown', (event) => {
 });
 
 function beginDrag() {
+  finishGlide();
   dragCandidate.active = true;
+  dragCandidate.lastSample = { x: sim.x, y: sim.y, time: performance.now() };
+  dragCandidate.velocity = { x: 0, y: 0 };
   stopMoving(false);
+  sim.jumpY = 0;
+  sim.jumpVelocity = 0;
+  sim.landingTime = 0;
   dragging = true;
   debugUntil = 0;
   sprite.classList.add('is-dragging');
@@ -471,8 +705,23 @@ function onDragMove(event) {
   }
 
   // Written straight into the simulation; the loop renders it next frame.
-  sim.x = event.clientX - dragCandidate.grabOffsetX;
-  sim.y = event.clientY - dragCandidate.grabOffsetY;
+  const nextX = event.clientX - dragCandidate.grabOffsetX;
+  const nextY = event.clientY - dragCandidate.grabOffsetY;
+  const now = performance.now();
+  const previous = dragCandidate.lastSample;
+  const elapsed = now - previous.time;
+  if (elapsed >= 8 && elapsed <= GLIDE_SAMPLE_MAX_AGE_MS) {
+    dragCandidate.velocity = {
+      x: (nextX - previous.x) * 1000 / elapsed,
+      y: (nextY - previous.y) * 1000 / elapsed
+    };
+  } else {
+    dragCandidate.velocity = { x: 0, y: 0 };
+  }
+  dragCandidate.lastSample = { x: nextX, y: nextY, time: now };
+  const bounded = clampToOverlay(nextX, nextY);
+  sim.x = bounded.x;
+  sim.y = bounded.y;
 }
 
 function onDragUp() {
@@ -480,10 +729,27 @@ function onDragUp() {
   window.removeEventListener('mouseup', onDragUp);
 
   if (dragCandidate && dragCandidate.active) {
+    const bounded = clampToOverlay(sim.x, sim.y);
+    sim.x = bounded.x;
+    sim.y = bounded.y;
     suppressNextClick = true;
     dragging = false;
     sprite.classList.remove('is-dragging');
-    window.pochi.dragEnd({ x: sim.x, y: sim.y });
+    const age = performance.now() - dragCandidate.lastSample.time;
+    const speed = Math.hypot(dragCandidate.velocity.x, dragCandidate.velocity.y);
+    const isThrow = age <= GLIDE_SAMPLE_MAX_AGE_MS && speed >= THROW_TRIGGER_SPEED;
+    const maxSpeed = isThrow ? THROW_MAX_SPEED : GLIDE_MAX_SPEED;
+    const factor = speed > maxSpeed ? maxSpeed / speed : 1;
+    if (age <= GLIDE_SAMPLE_MAX_AGE_MS && speed >= GLIDE_MIN_SPEED) {
+      sim.throwing = isThrow;
+      sim.throwBounces = 0;
+      sim.glideVX = dragCandidate.velocity.x * factor;
+      sim.glideVY = dragCandidate.velocity.y * factor;
+      sim.gliding = true;
+      ensureLoop();
+    } else {
+      window.pochi.dragEnd({ x: sim.x, y: sim.y });
+    }
     scheduleIdleRefresh();
   }
 
