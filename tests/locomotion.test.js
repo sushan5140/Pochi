@@ -294,3 +294,23 @@ test('dragging cannot leave the overlay even when pointer does', () => {
   assert.equal(h.sample('sim.x'), 0);
   assert.equal(h.sample('sim.y'), 456);
 });
+
+test('idle breathing is subtle and stops during locomotion', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  assert.equal(h.sample('breathingScale(0)'), 1);
+  const mid = h.sample('breathingScale(2000)');
+  assert.ok(mid > 1 && mid <= 1.0061);
+  h.send({ state: 'walking', target: { x: 250, y: 0 } });
+  assert.equal(h.sample('breathingScale(2000)'), 1);
+});
+
+test('breathing is suspended during landing and non-idle poses', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.landingTime = LANDING_RECOVERY_S');
+  assert.equal(h.sample('breathingScale(2000)'), 1);
+  h.sample('sim.landingTime = 0');
+  h.send({ state: 'sleeping', pose: null });
+  assert.equal(h.sample('breathingScale(2000)'), 1);
+});
