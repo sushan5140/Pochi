@@ -81,6 +81,11 @@ const GLIDE_MAX_SPEED = 260;
 const GLIDE_DECELERATION = 900;
 const GLIDE_MIN_SPEED = 35;
 const GLIDE_SAMPLE_MAX_AGE_MS = 90;
+// M1.3 L8: deliberate fast throws travel further and rebound softly once.
+const THROW_TRIGGER_SPEED = 420;
+const THROW_MAX_SPEED = 520;
+const THROW_DECELERATION = 700;
+const THROW_BOUNCE_FACTOR = 0.32;
 
 // Sprite shown when she's stood still with no state-specific pose.
 // poses/arms_crossed.png is the only full-body pose that's both upright
@@ -139,6 +144,8 @@ const sim = {
   glideVX: 0,
   glideVY: 0,
   gliding: false,
+  throwing: false,
+  throwBounces: 0,
   turning: false,
   heading: 0,
   turnTarget: 0,
@@ -221,6 +228,8 @@ function landingScale() {
 function finishGlide() {
   if (!sim.gliding) return;
   sim.gliding = false;
+  sim.throwing = false;
+  sim.throwBounces = 0;
   sim.glideVX = 0;
   sim.glideVY = 0;
   window.pochi.dragEnd({ x: sim.x, y: sim.y });
@@ -230,19 +239,36 @@ function updateGlide(dt) {
   if (!sim.gliding) return;
   const speed = Math.hypot(sim.glideVX, sim.glideVY);
   if (speed <= GLIDE_MIN_SPEED) { finishGlide(); return; }
-  const nextSpeed = Math.max(0, speed - GLIDE_DECELERATION * dt);
+  const deceleration = sim.throwing ? THROW_DECELERATION : GLIDE_DECELERATION;
+  const nextSpeed = Math.max(0, speed - deceleration * dt);
   const distance = (speed + nextSpeed) * 0.5 * dt;
   const boundX = Math.max(0, window.innerWidth - 144);
   const boundY = Math.max(0, window.innerHeight - 144);
-  const nx = Math.min(boundX, Math.max(0, sim.x + sim.glideVX / speed * distance));
-  const ny = Math.min(boundY, Math.max(0, sim.y + sim.glideVY / speed * distance));
-  const collided = nx !== sim.x + sim.glideVX / speed * distance ||
-    ny !== sim.y + sim.glideVY / speed * distance;
+  const proposedX = sim.x + sim.glideVX / speed * distance;
+  const proposedY = sim.y + sim.glideVY / speed * distance;
+  const nx = Math.min(boundX, Math.max(0, proposedX));
+  const ny = Math.min(boundY, Math.max(0, proposedY));
+  const hitX = nx !== proposedX;
+  const hitY = ny !== proposedY;
   sim.x = nx;
   sim.y = ny;
   sim.glideVX *= nextSpeed / speed;
   sim.glideVY *= nextSpeed / speed;
-  if (collided || nextSpeed <= GLIDE_MIN_SPEED) finishGlide();
+  if (hitX || hitY) {
+    if (!sim.throwing || sim.throwBounces >= 1) {
+      finishGlide();
+      return;
+    }
+    sim.throwBounces += 1;
+    if (hitX) sim.glideVX = -sim.glideVX * THROW_BOUNCE_FACTOR;
+    if (hitY) sim.glideVY = -sim.glideVY * THROW_BOUNCE_FACTOR;
+    // One soft rebound maximum; friction ends the remaining drift.
+    if (Math.hypot(sim.glideVX, sim.glideVY) <= GLIDE_MIN_SPEED) {
+      finishGlide();
+      return;
+    }
+  }
+  if (nextSpeed <= GLIDE_MIN_SPEED) finishGlide();
 }
 
 function stopMoving(reachedTarget) {
@@ -682,8 +708,12 @@ function onDragUp() {
     sprite.classList.remove('is-dragging');
     const age = performance.now() - dragCandidate.lastSample.time;
     const speed = Math.hypot(dragCandidate.velocity.x, dragCandidate.velocity.y);
-    const factor = speed > GLIDE_MAX_SPEED ? GLIDE_MAX_SPEED / speed : 1;
+    const isThrow = age <= GLIDE_SAMPLE_MAX_AGE_MS && speed >= THROW_TRIGGER_SPEED;
+    const maxSpeed = isThrow ? THROW_MAX_SPEED : GLIDE_MAX_SPEED;
+    const factor = speed > maxSpeed ? maxSpeed / speed : 1;
     if (age <= GLIDE_SAMPLE_MAX_AGE_MS && speed >= GLIDE_MIN_SPEED) {
+      sim.throwing = isThrow;
+      sim.throwBounces = 0;
       sim.glideVX = dragCandidate.velocity.x * factor;
       sim.glideVY = dragCandidate.velocity.y * factor;
       sim.gliding = true;
