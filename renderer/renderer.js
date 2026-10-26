@@ -76,6 +76,10 @@ const JUMP_GRAVITY_PX_S2 = 750;
 // M1.2 L5: brief, damped landing recovery (no extra screen movement).
 const LANDING_RECOVERY_S = 0.28;
 const LANDING_SQUASH = 0.12;
+// M1.4 L10: gentle, timer-sampled idle breathing, no permanent rAF.
+const BREATH_PERIOD_MS = 4000;
+const BREATH_SAMPLE_MS = 500;
+const BREATH_SCALE = 0.006;
 // M1.3 L7: gentle bounded momentum after dragging, before IPC dragEnd.
 const GLIDE_MAX_SPEED = 260;
 const GLIDE_DECELERATION = 900;
@@ -340,6 +344,11 @@ function gaitOffset() {
   return { x, y };
 }
 
+function breathingScale(now) {
+  if (sim.moving || sim.gliding || dragging || sim.jumpVelocity || sim.jumpY || sim.landingTime || latest.state !== 'idle') return 1;
+  return 1 + BREATH_SCALE * (1 - Math.cos(2 * Math.PI * now / BREATH_PERIOD_MS)) / 2;
+}
+
 function render(now) {
   const transform = `translate3d(${sim.x.toFixed(2)}px, ${(sim.y + sim.jumpY).toFixed(2)}px, 0)`;
   if (transform !== lastTransform) {
@@ -360,10 +369,12 @@ function render(now) {
   const landing = landingScale();
   const recovery = sim.landingTime > 0
     ? `scale(${landing.x.toFixed(4)}, ${landing.y.toFixed(4)})` : '';
+  const breath = breathingScale(now);
+  const breathe = breath !== 1 ? `scaleY(${breath.toFixed(4)})` : '';
   // Scale is centered at the feet by anchoring the transform origin.
   const spriteTransform = [
     (gait.x || gait.y) ? `translate(${gait.x.toFixed(2)}px, ${gait.y.toFixed(2)}px)` : '',
-    recovery, flip
+    recovery, breathe, flip
   ].filter(Boolean).join(' ');
   if (spriteTransform !== lastSpriteTransform) {
     sprite.style.transformOrigin = '50% 100%';
@@ -477,13 +488,19 @@ function loop(now) {
 function scheduleIdleRefresh() {
   clearTimeout(idleTimer);
   idleTimer = null;
-  if (isAnimating() || !latest.pose) return; // nothing alternates without a pose
+  if (isAnimating()) return;
   const now = performance.now();
+  const breathing = latest.state === 'idle';
+  if (!breathing && !latest.pose) return;
   const nextBoundary = (Math.floor(now / IDLE_ALTERNATE_MS) + 1) * IDLE_ALTERNATE_MS;
+  const delay = breathing
+    ? Math.min(BREATH_SAMPLE_MS, latest.pose ? nextBoundary - now : BREATH_SAMPLE_MS)
+    : nextBoundary - now;
   idleTimer = setTimeout(() => {
+    if (isAnimating()) return;
     render(performance.now());
     scheduleIdleRefresh();
-  }, Math.max(16, nextBoundary - now));
+  }, Math.max(16, delay));
 }
 
 function applyState(data) {
