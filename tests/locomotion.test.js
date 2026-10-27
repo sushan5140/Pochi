@@ -336,3 +336,25 @@ test('L11 micro-motion never overrides walking or non-idle expressions', () => {
   assert.equal(h.sample('idleMicroMotion(90).blink'), 1);
   assert.equal(h.sample('idleMicroMotion(600).glance'), 0);
 });
+
+test('L12 posture moves gently and returns to neutral within one cycle', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  assert.equal(h.sample('idlePosture(0).tilt'), 0);
+  const midway = h.sample('idlePosture(POSTURE_PERIOD_MS / 2)');
+  assert.ok(midway.shift > 0 && midway.shift <= 1.2);
+  assert.ok(midway.tilt > 0 && midway.tilt <= 0.65);
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS * 0.9).tilt'), 0);
+});
+
+test('L12 posture does not affect locomotion, landing or non-idle expressions', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 200, y: 0 } });
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).shift'), 0);
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.landingTime = LANDING_RECOVERY_S');
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt'), 0);
+  h.sample('sim.landingTime = 0');
+  h.send({ state: 'nagging_water', pose: 'water_bottle' });
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt'), 0);
+});
