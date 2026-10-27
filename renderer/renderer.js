@@ -544,7 +544,7 @@ function scheduleIdleRefresh() {
   if (!breathing && !latest.pose) return;
   const nextBoundary = (Math.floor(now / IDLE_ALTERNATE_MS) + 1) * IDLE_ALTERNATE_MS;
   const delay = breathing
-    ? Math.min(BREATH_SAMPLE_MS, 90, latest.pose ? nextBoundary - now : BREATH_SAMPLE_MS)
+    ? Math.min(BREATH_SAMPLE_MS, latest.pose ? nextBoundary - now : BREATH_SAMPLE_MS)
     : nextBoundary - now;
   idleTimer = setTimeout(() => {
     if (isAnimating()) return;
