@@ -48,7 +48,12 @@ function harness() {
     for (let i = 0; i < frames; i++) {
       tick += 1000 / 30 + 0.01;
       const next = callbacks.shift();
-      if (!next) throw new Error('Animation loop stopped unexpectedly');
+      if (!next) {
+        // A settled simulation correctly stops scheduling rAF; advancing
+        // beyond that point is harmless, not a test failure.
+        if (!vm.runInContext('isAnimating()', context)) continue;
+        throw new Error('Animation loop stopped while still animating');
+      }
       next(tick);
     }
   };
