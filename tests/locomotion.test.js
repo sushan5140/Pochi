@@ -314,3 +314,25 @@ test('breathing is suspended during landing and non-idle poses', () => {
   h.send({ state: 'sleeping', pose: null });
   assert.equal(h.sample('breathingScale(2000)'), 1);
 });
+
+test('L11 idle micro-motion remains bounded and periodically returns to neutral', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  const neutral = h.sample('idleMicroMotion(500)');
+  assert.equal(neutral.blink, 1);
+  const closing = h.sample('idleMicroMotion(90)');
+  assert.ok(closing.blink >= 0.986 && closing.blink < 1);
+  const glance = h.sample('idleMicroMotion(600)');
+  assert.ok(glance.glance > 0 && glance.glance <= 0.65);
+  assert.equal(h.sample('idleMicroMotion(2000).glance'), 0);
+});
+
+test('L11 micro-motion never overrides walking or non-idle expressions', () => {
+  const h = harness();
+  h.send({ state: 'nagging_water', pose: 'water_bottle' });
+  assert.equal(h.sample('idleMicroMotion(90).blink'), 1);
+  assert.equal(h.sample('idleMicroMotion(600).glance'), 0);
+  h.send({ state: 'walking', target: { x: 300, y: 0 } });
+  assert.equal(h.sample('idleMicroMotion(90).blink'), 1);
+  assert.equal(h.sample('idleMicroMotion(600).glance'), 0);
+});
