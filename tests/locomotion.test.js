@@ -358,3 +358,27 @@ test('L12 posture does not affect locomotion, landing or non-idle expressions', 
   h.send({ state: 'nagging_water', pose: 'water_bottle' });
   assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt'), 0);
 });
+
+test('L13 prevents physics overlap between a throw and new jump', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.gliding = true; sim.throwing = true; sim.glideVX = 200');
+  assert.equal(h.sample('startJump()'), false);
+  assert.equal(h.sample('sim.jumpVelocity'), 0);
+  h.sample('finishGlide()');
+  assert.equal(h.sample('startJump()'), true);
+});
+
+test('L13 rapid retargeting keeps all movement values finite and in bounds', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 600, y: 200 } });
+  for (let i = 0; i < 120; i++) {
+    if (i % 12 === 0) {
+      h.send({ state: 'walking', target: i % 24 === 0 ? { x: 0, y: 0 } : { x: 656, y: 456 } });
+    }
+    h.advance();
+    assert.equal(h.sample('Number.isFinite(sim.x) && Number.isFinite(sim.y) && Number.isFinite(sim.currentSpeed)'), true);
+    assert.ok(h.sample('sim.x') >= 0 && h.sample('sim.x') <= 656);
+    assert.ok(h.sample('sim.y') >= 0 && h.sample('sim.y') <= 456);
+  }
+});
