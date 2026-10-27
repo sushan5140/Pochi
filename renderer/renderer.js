@@ -213,7 +213,7 @@ function faceHeading(angle) {
 }
 
 function startJump() {
-  if (dragging || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
+  if (dragging || sim.gliding || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
   sim.landingTime = 0;
   sim.jumpVelocity = JUMP_VELOCITY_PX_S;
   ensureLoop();
