@@ -12,6 +12,7 @@ function harness() {
   let stateHandler;
   const dragEnds = [];
   const windowHandlers = {};
+  const clearedTimers = [];
   const element = () => ({
     style: {},
     classList: { add() {}, remove() {} },
@@ -39,7 +40,7 @@ function harness() {
     performance: { now: () => tick },
     requestAnimationFrame: cb => callbacks.push(cb),
     setTimeout: () => 1,
-    clearTimeout() {},
+    clearTimeout: id => clearedTimers.push(id),
     Math
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../renderer/renderer.js'), 'utf8'), context);
@@ -57,7 +58,7 @@ function harness() {
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers };
+  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -386,4 +387,21 @@ test('L13 rapid retargeting keeps all movement values finite and in bounds', () 
     assert.ok(h.sample('sim.x') >= 0 && h.sample('sim.x') <= 656);
     assert.ok(h.sample('sim.y') >= 0 && h.sample('sim.y') <= 456);
   }
+});
+
+test('L14 starting active animation cancels pending idle timer', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('idleTimer = 17');
+  h.send({ state: 'walking', target: { x: 150, y: 0 } });
+  assert.equal(h.sample('idleTimer'), null);
+  assert.ok(h.clearedTimers.includes(17));
+});
+
+test('L14 transform origin is fixed once and survives multiple render passes', () => {
+  const h = harness();
+  assert.equal(h.sample("sprite.style.transformOrigin"), '50% 100%');
+  h.send({ state: 'idle', pose: null });
+  h.sample('render(1000)');
+  assert.equal(h.sample("sprite.style.transformOrigin"), '50% 100%');
 });
