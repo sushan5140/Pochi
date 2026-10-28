@@ -2,7 +2,7 @@
 
 ## Automated gates
 
-- [ ] GitHub Actions Renderer regression is green for the final PR head.
+- [x] GitHub Actions Renderer regression is green for the tested L15 PR head (2026-10-28); recheck if head changes.
 - [ ] Node syntax check and all `tests/locomotion.test.js` tests pass.
 - [ ] Review normal merge behavior and author attribution; do not squash distinct commits unless intended.
 
