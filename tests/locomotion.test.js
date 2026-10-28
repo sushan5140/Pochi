@@ -405,3 +405,34 @@ test('L14 transform origin is fixed once and survives multiple render passes', (
   h.sample('render(1000)');
   assert.equal(h.sample("sprite.style.transformOrigin"), '50% 100%');
 });
+
+test('L15 redundant display updates never interrupt active glide settlement', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.x = 100; sim.y = 100; sim.glideVX = 220; sim.glideVY = 0; sim.gliding = true; ensureLoop()');
+  h.send({ state: 'idle', pose: null, expression: 'happy' });
+  assert.equal(h.sample('sim.gliding'), true);
+  assert.equal(h.dragEnds.length, 0);
+  for (let i = 0; i < 90 && h.sample('sim.gliding'); i++) h.advance();
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('L15 resize clears stale drag-release momentum samples', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, grabOffsetX: 5, grabOffsetY: 5, lastSample: { x: 600, y: 400, time: -100 }, velocity: { x: 900, y: -500 } }; sim.x = 900; sim.y = 800');
+  h.windowHandlers.resize();
+  assert.equal(h.sample('sim.x'), 656);
+  assert.equal(h.sample('sim.y'), 456);
+  assert.equal(h.sample('dragCandidate.velocity.x'), 0);
+  assert.equal(h.sample('dragCandidate.velocity.y'), 0);
+});
+
+test('L15 genuine new movement cancels active glide exactly once', () => {
+  const h = harness();
+  h.sample('sim.x = 100; sim.y = 100; sim.glideVX = 200; sim.gliding = true; ensureLoop()');
+  h.send({ state: 'walking', target: { x: 200, y: 100 } });
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+  assert.equal(h.sample('sim.moving'), true);
+});
