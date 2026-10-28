@@ -579,6 +579,11 @@ function applyState(data) {
     try { window.pochiSound.play(data.sound); } catch (_) { /* sound is enhancement, never load-bearing */ }
   }
 
+  // While a release is still gliding, unrelated display updates must not
+  // interrupt the drag-end handshake. Real movement/placement takes priority.
+  if (sim.gliding && !data.place && !data.target && data.state === priorState) {
+    return;
+  }
   if (dragging) return; // user has hold of her; ignore positioning intent
   // Redundant updates in the same state must not cancel an in-flight jump
   // or the landing recovery. Only a real state/position change interrupts it.
@@ -636,6 +641,11 @@ window.addEventListener('resize', () => {
   const bounded = clampToOverlay(sim.x, sim.y);
   sim.x = bounded.x;
   sim.y = bounded.y;
+  if (dragging && dragCandidate && dragCandidate.active) {
+    // Keep drag sample anchors aligned after overlay size changes.
+    dragCandidate.lastSample = { x: sim.x, y: sim.y, time: performance.now() };
+    dragCandidate.velocity = { x: 0, y: 0 };
+  }
   if (sim.moving) {
     const target = clampToOverlay(sim.targetX, sim.targetY);
     sim.targetX = target.x;
