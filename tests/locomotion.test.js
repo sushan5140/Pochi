@@ -12,6 +12,7 @@ function harness() {
   let stateHandler;
   const dragEnds = [];
   const windowHandlers = {};
+  const clearedTimers = [];
   const element = () => ({
     style: {},
     classList: { add() {}, remove() {} },
@@ -39,7 +40,7 @@ function harness() {
     performance: { now: () => tick },
     requestAnimationFrame: cb => callbacks.push(cb),
     setTimeout: () => 1,
-    clearTimeout() {},
+    clearTimeout: id => clearedTimers.push(id),
     Math
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../renderer/renderer.js'), 'utf8'), context);
@@ -48,11 +49,16 @@ function harness() {
     for (let i = 0; i < frames; i++) {
       tick += 1000 / 30 + 0.01;
       const next = callbacks.shift();
-      if (!next) throw new Error('Animation loop stopped unexpectedly');
+      if (!next) {
+        // A settled simulation correctly stops scheduling rAF; advancing
+        // beyond that point is harmless, not a test failure.
+        if (!vm.runInContext('isAnimating()', context)) continue;
+        throw new Error('Animation loop stopped while still animating');
+      }
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers };
+  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -335,4 +341,98 @@ test('L11 micro-motion never overrides walking or non-idle expressions', () => {
   h.send({ state: 'walking', target: { x: 300, y: 0 } });
   assert.equal(h.sample('idleMicroMotion(90).blink'), 1);
   assert.equal(h.sample('idleMicroMotion(600).glance'), 0);
+});
+
+test('L12 posture moves gently and returns to neutral within one cycle', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  assert.equal(h.sample('idlePosture(0).tilt'), 0);
+  const midway = h.sample('idlePosture(POSTURE_PERIOD_MS / 2)');
+  assert.ok(midway.shift > 0 && midway.shift <= 1.2);
+  assert.ok(midway.tilt > 0 && midway.tilt <= 0.65);
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS * 0.9).tilt'), 0);
+});
+
+test('L12 posture does not affect locomotion, landing or non-idle expressions', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 200, y: 0 } });
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).shift'), 0);
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.landingTime = LANDING_RECOVERY_S');
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt'), 0);
+  h.sample('sim.landingTime = 0');
+  h.send({ state: 'nagging_water', pose: 'water_bottle' });
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt'), 0);
+});
+
+test('L13 prevents physics overlap between a throw and new jump', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.gliding = true; sim.throwing = true; sim.glideVX = 200');
+  assert.equal(h.sample('startJump()'), false);
+  assert.equal(h.sample('sim.jumpVelocity'), 0);
+  h.sample('finishGlide()');
+  assert.equal(h.sample('startJump()'), true);
+});
+
+test('L13 rapid retargeting keeps all movement values finite and in bounds', () => {
+  const h = harness();
+  h.send({ state: 'walking', target: { x: 600, y: 200 } });
+  for (let i = 0; i < 120; i++) {
+    if (i % 12 === 0) {
+      h.send({ state: 'walking', target: i % 24 === 0 ? { x: 0, y: 0 } : { x: 656, y: 456 } });
+    }
+    h.advance();
+    assert.equal(h.sample('Number.isFinite(sim.x) && Number.isFinite(sim.y) && Number.isFinite(sim.currentSpeed)'), true);
+    assert.ok(h.sample('sim.x') >= 0 && h.sample('sim.x') <= 656);
+    assert.ok(h.sample('sim.y') >= 0 && h.sample('sim.y') <= 456);
+  }
+});
+
+test('L14 starting active animation cancels pending idle timer', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('idleTimer = 17');
+  h.send({ state: 'walking', target: { x: 150, y: 0 } });
+  assert.equal(h.sample('idleTimer'), null);
+  assert.ok(h.clearedTimers.includes(17));
+});
+
+test('L14 transform origin is fixed once and survives multiple render passes', () => {
+  const h = harness();
+  assert.equal(h.sample("sprite.style.transformOrigin"), '50% 100%');
+  h.send({ state: 'idle', pose: null });
+  h.sample('render(1000)');
+  assert.equal(h.sample("sprite.style.transformOrigin"), '50% 100%');
+});
+
+test('L15 redundant display updates never interrupt active glide settlement', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.sample('sim.x = 100; sim.y = 100; sim.glideVX = 220; sim.glideVY = 0; sim.gliding = true; ensureLoop()');
+  h.send({ state: 'idle', pose: null, expression: 'happy' });
+  assert.equal(h.sample('sim.gliding'), true);
+  assert.equal(h.dragEnds.length, 0);
+  for (let i = 0; i < 90 && h.sample('sim.gliding'); i++) h.advance();
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('L15 resize clears stale drag-release momentum samples', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, grabOffsetX: 5, grabOffsetY: 5, lastSample: { x: 600, y: 400, time: -100 }, velocity: { x: 900, y: -500 } }; sim.x = 900; sim.y = 800');
+  h.windowHandlers.resize();
+  assert.equal(h.sample('sim.x'), 656);
+  assert.equal(h.sample('sim.y'), 456);
+  assert.equal(h.sample('dragCandidate.velocity.x'), 0);
+  assert.equal(h.sample('dragCandidate.velocity.y'), 0);
+});
+
+test('L15 genuine new movement cancels active glide exactly once', () => {
+  const h = harness();
+  h.sample('sim.x = 100; sim.y = 100; sim.glideVX = 200; sim.gliding = true; ensureLoop()');
+  h.send({ state: 'walking', target: { x: 200, y: 100 } });
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+  assert.equal(h.sample('sim.moving'), true);
 });

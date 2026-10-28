@@ -86,6 +86,10 @@ const BLINK_PERIOD_MS = 6100;
 const BLINK_DURATION_MS = 180;
 const EYE_GLANCE_PERIOD_MS = 9700;
 const EYE_GLANCE_PX = 0.65;
+// M1.4 L12: subtle, periodically resting posture shifts.
+const POSTURE_PERIOD_MS = 11300;
+const POSTURE_SHIFT_PX = 1.2;
+const POSTURE_TILT_DEG = 0.65;
 // M1.3 L7: gentle bounded momentum after dragging, before IPC dragEnd.
 const GLIDE_MAX_SPEED = 260;
 const GLIDE_DECELERATION = 900;
@@ -174,6 +178,8 @@ let debugIndex = 0;
 let lastTransform = '';
 let lastSrc = '';
 let lastSpriteTransform = '';
+// Transform origin never varies; setting it per frame is unnecessary.
+sprite.style.transformOrigin = '50% 100%';
 
 let loopRunning = false;
 let idleTimer = null;
@@ -209,7 +215,7 @@ function faceHeading(angle) {
 }
 
 function startJump() {
-  if (dragging || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
+  if (dragging || sim.gliding || sim.jumpY !== 0 || sim.jumpVelocity !== 0 || sim.moving) return false;
   sim.landingTime = 0;
   sim.jumpVelocity = JUMP_VELOCITY_PX_S;
   ensureLoop();
@@ -371,6 +377,24 @@ function idleMicroMotion(now) {
   return { blink, glance };
 }
 
+function idlePosture(now) {
+  if (latest.state !== 'idle' || sim.moving || sim.gliding || dragging ||
+      sim.jumpVelocity || sim.jumpY || sim.landingTime || debugUntil > now) {
+    return { shift: 0, tilt: 0 };
+  }
+  const phase = now % POSTURE_PERIOD_MS;
+  // Active only for the middle half of the cycle; never permanently leaning.
+  if (phase < POSTURE_PERIOD_MS * 0.25 || phase > POSTURE_PERIOD_MS * 0.75) {
+    return { shift: 0, tilt: 0 };
+  }
+  const progress = (phase / POSTURE_PERIOD_MS - 0.25) * 2;
+  const envelope = Math.sin(Math.PI * progress) ** 2;
+  return {
+    shift: POSTURE_SHIFT_PX * envelope,
+    tilt: POSTURE_TILT_DEG * envelope
+  };
+}
+
 function render(now) {
   const transform = `translate3d(${sim.x.toFixed(2)}px, ${(sim.y + sim.jumpY).toFixed(2)}px, 0)`;
   if (transform !== lastTransform) {
@@ -393,16 +417,18 @@ function render(now) {
     ? `scale(${landing.x.toFixed(4)}, ${landing.y.toFixed(4)})` : '';
   const breath = breathingScale(now);
   const micro = idleMicroMotion(now);
+  const posture = idlePosture(now);
   const breathe = breath !== 1 ? `scaleY(${breath.toFixed(4)})` : '';
   const glance = micro.glance ? `translateX(${micro.glance.toFixed(3)}px)` : '';
   const blink = micro.blink !== 1 ? `scaleY(${micro.blink.toFixed(4)})` : '';
+  const shift = posture.shift ? `translateX(${posture.shift.toFixed(3)}px)` : '';
+  const tilt = posture.tilt ? `rotate(${posture.tilt.toFixed(3)}deg)` : '';
   // Scale is centered at the feet by anchoring the transform origin.
   const spriteTransform = [
     (gait.x || gait.y) ? `translate(${gait.x.toFixed(2)}px, ${gait.y.toFixed(2)}px)` : '',
-    recovery, breathe, blink, glance, flip
+    recovery, breathe, blink, glance, shift, tilt, flip
   ].filter(Boolean).join(' ');
   if (spriteTransform !== lastSpriteTransform) {
-    sprite.style.transformOrigin = '50% 100%';
     sprite.style.transform = spriteTransform;
     lastSpriteTransform = spriteTransform;
   }
@@ -417,6 +443,12 @@ function isAnimating() {
 }
 
 function ensureLoop() {
+  // Transition to active motion cancels idle wakeups immediately. Otherwise
+  // an old idle timeout can redraw the fullscreen transparent overlay mid-walk.
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
   if (loopRunning) return;
   loopRunning = true;
   lastFrameTime = performance.now();
@@ -519,7 +551,7 @@ function scheduleIdleRefresh() {
   if (!breathing && !latest.pose) return;
   const nextBoundary = (Math.floor(now / IDLE_ALTERNATE_MS) + 1) * IDLE_ALTERNATE_MS;
   const delay = breathing
-    ? Math.min(BREATH_SAMPLE_MS, 90, latest.pose ? nextBoundary - now : BREATH_SAMPLE_MS)
+    ? Math.min(BREATH_SAMPLE_MS, latest.pose ? nextBoundary - now : BREATH_SAMPLE_MS)
     : nextBoundary - now;
   idleTimer = setTimeout(() => {
     if (isAnimating()) return;
@@ -547,6 +579,11 @@ function applyState(data) {
     try { window.pochiSound.play(data.sound); } catch (_) { /* sound is enhancement, never load-bearing */ }
   }
 
+  // While a release is still gliding, unrelated display updates must not
+  // interrupt the drag-end handshake. Real movement/placement takes priority.
+  if (sim.gliding && !data.place && !data.target && data.state === priorState) {
+    return;
+  }
   if (dragging) return; // user has hold of her; ignore positioning intent
   // Redundant updates in the same state must not cancel an in-flight jump
   // or the landing recovery. Only a real state/position change interrupts it.
@@ -604,6 +641,11 @@ window.addEventListener('resize', () => {
   const bounded = clampToOverlay(sim.x, sim.y);
   sim.x = bounded.x;
   sim.y = bounded.y;
+  if (dragging && dragCandidate && dragCandidate.active) {
+    // Keep drag sample anchors aligned after overlay size changes.
+    dragCandidate.lastSample = { x: sim.x, y: sim.y, time: performance.now() };
+    dragCandidate.velocity = { x: 0, y: 0 };
+  }
   if (sim.moving) {
     const target = clampToOverlay(sim.targetX, sim.targetY);
     sim.targetX = target.x;
