@@ -178,6 +178,8 @@ let debugIndex = 0;
 let lastTransform = '';
 let lastSrc = '';
 let lastSpriteTransform = '';
+// Transform origin never varies; setting it per frame is unnecessary.
+sprite.style.transformOrigin = '50% 100%';
 
 let loopRunning = false;
 let idleTimer = null;
@@ -427,7 +429,6 @@ function render(now) {
     recovery, breathe, blink, glance, shift, tilt, flip
   ].filter(Boolean).join(' ');
   if (spriteTransform !== lastSpriteTransform) {
-    sprite.style.transformOrigin = '50% 100%';
     sprite.style.transform = spriteTransform;
     lastSpriteTransform = spriteTransform;
   }
@@ -442,6 +443,12 @@ function isAnimating() {
 }
 
 function ensureLoop() {
+  // Transition to active motion cancels idle wakeups immediately. Otherwise
+  // an old idle timeout can redraw the fullscreen transparent overlay mid-walk.
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
   if (loopRunning) return;
   loopRunning = true;
   lastFrameTime = performance.now();
