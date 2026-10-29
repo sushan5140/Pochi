@@ -174,7 +174,15 @@ const sim = {
 
 let latest = { state: 'idle', pose: null, expression: 'happy', dialogue: null };
 let dragging = false;
-let suppressNextClick = false;
+let suppressClickUntil = 0;
+// A drag may not produce a browser click (especially right-button drags).
+// A short expiry prevents swallowing the next genuine click indefinitely.
+const DRAG_CLICK_SUPPRESS_MS = 350;
+function consumeDragClick(now) {
+  const suppressed = suppressClickUntil > 0 && now <= suppressClickUntil;
+  suppressClickUntil = 0;
+  return suppressed;
+}
 let debugUntil = 0;
 let debugIndex = 0;
 
@@ -684,10 +692,7 @@ scheduleIdleRefresh();
 sprite.addEventListener('click', (event) => {
   // Explicit opt-in: Ctrl+click performs one small jump, leaving the normal
   // click/double-click, nag resolution, and mini-game semantics untouched.
-  if (suppressNextClick) {
-    suppressNextClick = false;
-    return;
-  }
+  if (consumeDragClick(performance.now())) return;
   if (event.ctrlKey && latest.state === 'idle') {
     startJump();
     return;
@@ -834,7 +839,8 @@ function onDragUp() {
     const bounded = clampToOverlay(sim.x, sim.y);
     sim.x = bounded.x;
     sim.y = bounded.y;
-    suppressNextClick = true;
+    suppressClickUntil = dragCandidate.button === 0
+      ? performance.now() + DRAG_CLICK_SUPPRESS_MS : 0;
     dragging = false;
     sprite.classList.remove('is-dragging');
     const age = performance.now() - dragCandidate.lastSample.time;
