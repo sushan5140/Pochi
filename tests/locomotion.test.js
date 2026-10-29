@@ -462,3 +462,25 @@ test('M2 L1 allows normal idle animations after reduced-motion setting is cleare
   assert.ok(h.sample('breathingScale(2000)') > 1);
   assert.ok(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt') > 0);
 });
+
+test('M2 L2 suppresses only immediate post-left-drag click', () => {
+  const h = harness();
+  h.sample('suppressClickUntil = 350');
+  assert.equal(h.sample('consumeDragClick(100)'), true);
+  assert.equal(h.sample('consumeDragClick(120)'), false);
+});
+
+test('M2 L2 expired suppression cannot eat a later genuine click', () => {
+  const h = harness();
+  h.sample('suppressClickUntil = 350');
+  assert.equal(h.sample('consumeDragClick(351)'), false);
+  assert.equal(h.sample('suppressClickUntil'), 0);
+});
+
+test('M2 L2 right-button release never suppresses left click', () => {
+  const h = harness();
+  h.sample('dragCandidate = { active: true, button: 2, lastSample: { x: 0, y: 0, time: -1000 }, velocity: { x: 0, y: 0 } }; dragging = true');
+  h.sample('onDragUp()');
+  assert.equal(h.sample('suppressClickUntil'), 0);
+  assert.equal(h.sample('consumeDragClick(100)'), false);
+});
