@@ -13,6 +13,7 @@ function harness() {
   const dragEnds = [];
   const windowHandlers = {};
   const clearedTimers = [];
+  const motionSetting = { matches: false, addEventListener(name, cb) { this.onChange = cb; } };
   const element = () => ({
     style: {},
     classList: { add() {}, remove() {} },
@@ -25,6 +26,7 @@ function harness() {
   const context = vm.createContext({
     document: { getElementById: key => dom[key] },
     window: {
+      matchMedia: () => motionSetting,
       innerWidth: 800,
       innerHeight: 600,
       addEventListener: (name, fn) => { windowHandlers[name] = fn; },
@@ -58,7 +60,7 @@ function harness() {
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers };
+  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers, motionSetting };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -435,4 +437,28 @@ test('L15 genuine new movement cancels active glide exactly once', () => {
   assert.equal(h.sample('sim.gliding'), false);
   assert.equal(h.dragEnds.length, 1);
   assert.equal(h.sample('sim.moving'), true);
+});
+
+test('M2 L1 reduced motion suppresses decorative idle animation', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  assert.ok(h.sample('breathingScale(2000)') > 1);
+  h.motionSetting.matches = true;
+  h.motionSetting.onChange();
+  assert.equal(h.sample('breathingScale(2000)'), 1);
+  assert.equal(h.sample('idleMicroMotion(90).blink'), 1);
+  assert.equal(h.sample('idleMicroMotion(600).glance'), 0);
+  assert.equal(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt'), 0);
+  assert.equal(h.sample('idleTimer'), null);
+});
+
+test('M2 L1 allows normal idle animations after reduced-motion setting is cleared', () => {
+  const h = harness();
+  h.send({ state: 'idle', pose: null });
+  h.motionSetting.matches = true;
+  h.motionSetting.onChange();
+  h.motionSetting.matches = false;
+  h.motionSetting.onChange();
+  assert.ok(h.sample('breathingScale(2000)') > 1);
+  assert.ok(h.sample('idlePosture(POSTURE_PERIOD_MS / 2).tilt') > 0);
 });
