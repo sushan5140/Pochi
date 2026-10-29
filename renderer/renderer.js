@@ -14,6 +14,10 @@ const wrap = document.getElementById('pochi-wrap');
 const sprite = document.getElementById('pochi-sprite');
 const bubble = document.getElementById('pochi-bubble');
 
+// M2.1 L1: respect OS accessibility preferences without affecting gameplay.
+const motionPreference = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+function reducedMotion() { return Boolean(motionPreference && motionPreference.matches); }
+
 const DEBUG_EXPRESSIONS = ['happy', 'smug', 'angry', 'tired', 'laughing', 'judging', 'worried', 'sleepy'];
 const RESOLVABLE = ['nagging_water', 'nagging_food', 'nagging_break', 'nagging_entertainment', 'nagging_debug_support', 'nagging_distraction'];
 
@@ -170,7 +174,15 @@ const sim = {
 
 let latest = { state: 'idle', pose: null, expression: 'happy', dialogue: null };
 let dragging = false;
-let suppressNextClick = false;
+let suppressClickUntil = 0;
+// A drag may not produce a browser click (especially right-button drags).
+// A short expiry prevents swallowing the next genuine click indefinitely.
+const DRAG_CLICK_SUPPRESS_MS = 350;
+function consumeDragClick(now) {
+  const suppressed = suppressClickUntil > 0 && now <= suppressClickUntil;
+  suppressClickUntil = 0;
+  return suppressed;
+}
 let debugUntil = 0;
 let debugIndex = 0;
 
@@ -357,11 +369,13 @@ function gaitOffset() {
 }
 
 function breathingScale(now) {
+  if (reducedMotion()) return 1;
   if (sim.moving || sim.gliding || dragging || sim.jumpVelocity || sim.jumpY || sim.landingTime || latest.state !== 'idle') return 1;
   return 1 + BREATH_SCALE * (1 - Math.cos(2 * Math.PI * now / BREATH_PERIOD_MS)) / 2;
 }
 
 function idleMicroMotion(now) {
+  if (reducedMotion()) return { blink: 1, glance: 0 };
   if (latest.state !== 'idle' || sim.moving || sim.gliding || dragging ||
       sim.jumpVelocity || sim.jumpY || sim.landingTime || debugUntil > now) {
     return { blink: 1, glance: 0 };
@@ -378,6 +392,7 @@ function idleMicroMotion(now) {
 }
 
 function idlePosture(now) {
+  if (reducedMotion()) return { shift: 0, tilt: 0 };
   if (latest.state !== 'idle' || sim.moving || sim.gliding || dragging ||
       sim.jumpVelocity || sim.jumpY || sim.landingTime || debugUntil > now) {
     return { shift: 0, tilt: 0 };
@@ -547,7 +562,7 @@ function scheduleIdleRefresh() {
   idleTimer = null;
   if (isAnimating()) return;
   const now = performance.now();
-  const breathing = latest.state === 'idle';
+  const breathing = latest.state === 'idle' && !reducedMotion();
   if (!breathing && !latest.pose) return;
   const nextBoundary = (Math.floor(now / IDLE_ALTERNATE_MS) + 1) * IDLE_ALTERNATE_MS;
   const delay = breathing
@@ -654,6 +669,17 @@ window.addEventListener('resize', () => {
   render(performance.now());
 });
 
+// Repaint immediately when the OS motion preference changes. Avoid a
+// standing timer when the user has asked for reduced motion.
+if (motionPreference) {
+  const onMotionPreferenceChange = () => {
+    render(performance.now());
+    scheduleIdleRefresh();
+  };
+  if (motionPreference.addEventListener) motionPreference.addEventListener('change', onMotionPreferenceChange);
+  else if (motionPreference.addListener) motionPreference.addListener(onMotionPreferenceChange);
+}
+
 window.pochi.onState(applyState);
 render(performance.now());
 scheduleIdleRefresh();
@@ -666,10 +692,7 @@ scheduleIdleRefresh();
 sprite.addEventListener('click', (event) => {
   // Explicit opt-in: Ctrl+click performs one small jump, leaving the normal
   // click/double-click, nag resolution, and mini-game semantics untouched.
-  if (suppressNextClick) {
-    suppressNextClick = false;
-    return;
-  }
+  if (consumeDragClick(performance.now())) return;
   if (event.ctrlKey && latest.state === 'idle') {
     startJump();
     return;
@@ -816,7 +839,8 @@ function onDragUp() {
     const bounded = clampToOverlay(sim.x, sim.y);
     sim.x = bounded.x;
     sim.y = bounded.y;
-    suppressNextClick = true;
+    suppressClickUntil = dragCandidate.button === 0
+      ? performance.now() + DRAG_CLICK_SUPPRESS_MS : 0;
     dragging = false;
     sprite.classList.remove('is-dragging');
     const age = performance.now() - dragCandidate.lastSample.time;
