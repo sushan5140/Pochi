@@ -484,3 +484,32 @@ test('M2 L2 right-button release never suppresses left click', () => {
   assert.equal(h.sample('suppressClickUntil'), 0);
   assert.equal(h.sample('consumeDragClick(100)'), false);
 });
+
+test('M2 L3 focus loss releases active drag once without throwing', () => {
+  const h = harness();
+  h.sample('sim.x = 190; sim.y = 120; dragging = true; dragCandidate = { active: true, button: 0, lastSample: { x: 170, y: 120, time: 0 }, velocity: { x: 900, y: 0 } }');
+  h.windowHandlers.blur();
+  assert.equal(h.sample('dragging'), false);
+  assert.equal(h.sample('dragCandidate'), null);
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+  assert.equal(h.dragEnds[0].x, 190);
+  h.windowHandlers.blur();
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('M2 L3 focus loss during an unstarted click leaves dragEnd untouched', () => {
+  const h = harness();
+  h.sample('dragCandidate = { active: false, button: 0 }');
+  h.windowHandlers.blur();
+  assert.equal(h.sample('dragCandidate'), null);
+  assert.equal(h.dragEnds.length, 0);
+});
+
+test('M2 L3 late mouse release after focus loss cannot send duplicate dragEnd', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, button: 2, lastSample: { x: 0, y: 0, time: 0 }, velocity: { x: 0, y: 0 } }');
+  h.windowHandlers.blur();
+  h.sample('onDragUp()');
+  assert.equal(h.dragEnds.length, 1);
+});
