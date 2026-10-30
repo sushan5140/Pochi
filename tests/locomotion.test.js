@@ -513,3 +513,32 @@ test('M2 L3 late mouse release after focus loss cannot send duplicate dragEnd', 
   h.sample('onDragUp()');
   assert.equal(h.dragEnds.length, 1);
 });
+
+test('M2.2 L1 Escape releases active drag without throw or duplicate dragEnd', () => {
+  const h = harness();
+  h.sample('sim.x = 180; sim.y = 140; dragging = true; dragCandidate = { active: true, button: 0, lastSample: { x: 150, y: 140, time: 0 }, velocity: { x: 900, y: 0 } }');
+  let prevented = false;
+  h.windowHandlers.keydown({ key: 'Escape', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(h.sample('dragging'), false);
+  assert.equal(h.sample('sim.gliding'), false);
+  assert.equal(h.dragEnds.length, 1);
+  h.windowHandlers.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('M2.2 L1 Escape cancels pending click gesture without reporting dragEnd', () => {
+  const h = harness();
+  h.sample('dragCandidate = { active: false, button: 0 }');
+  h.windowHandlers.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(h.sample('dragCandidate'), null);
+  assert.equal(h.dragEnds.length, 0);
+});
+
+test('M2.2 L1 unrelated keyboard events do not cancel active drag', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, button: 0 }');
+  h.windowHandlers.keydown({ key: 'Enter', preventDefault() { throw new Error("unexpected"); } });
+  assert.equal(h.sample('dragging'), true);
+  assert.equal(h.dragEnds.length, 0);
+});
