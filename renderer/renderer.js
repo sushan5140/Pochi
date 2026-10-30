@@ -831,6 +831,24 @@ function onDragMove(event) {
   sim.y = bounded.y;
 }
 
+// M2.1 L3: losing focus can swallow the mouseup. Cancel a held drag
+// safely rather than leaving the pet in an endless dragging state.
+function cancelDragOnBlur() {
+  if (!dragCandidate) return;
+  window.removeEventListener('mousemove', onDragMove);
+  window.removeEventListener('mouseup', onDragUp);
+  const wasDragging = dragCandidate.active;
+  dragCandidate = null;
+  if (!wasDragging) return;
+  dragging = false;
+  suppressClickUntil = 0;
+  sprite.classList.remove('is-dragging');
+  window.pochi.dragEnd({ x: sim.x, y: sim.y });
+  render(performance.now());
+  scheduleIdleRefresh();
+}
+window.addEventListener('blur', cancelDragOnBlur);
+
 function onDragUp() {
   window.removeEventListener('mousemove', onDragMove);
   window.removeEventListener('mouseup', onDragUp);
