@@ -849,6 +849,15 @@ function cancelDragOnBlur() {
 }
 window.addEventListener('blur', cancelDragOnBlur);
 
+// M2.2 L1: Escape cancels a drag safely, including during an initial
+// mouse hold. A held pet is released at its current bounded position;
+// no throw momentum is inferred from an intentional cancellation.
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !dragCandidate) return;
+  event.preventDefault();
+  cancelDragOnBlur();
+});
+
 function onDragUp() {
   window.removeEventListener('mousemove', onDragMove);
   window.removeEventListener('mouseup', onDragUp);
