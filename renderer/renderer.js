@@ -831,7 +831,38 @@ function onDragMove(event) {
   sim.y = bounded.y;
 }
 
-function onDragUp() {
+// M2.1 L3: losing focus can swallow the mouseup. Cancel a held drag
+// safely rather than leaving the pet in an endless dragging state.
+function cancelDragOnBlur() {
+  if (!dragCandidate) return;
+  window.removeEventListener('mousemove', onDragMove);
+  window.removeEventListener('mouseup', onDragUp);
+  const wasDragging = dragCandidate.active;
+  dragCandidate = null;
+  if (!wasDragging) return;
+  dragging = false;
+  suppressClickUntil = 0;
+  sprite.classList.remove('is-dragging');
+  window.pochi.dragEnd({ x: sim.x, y: sim.y });
+  render(performance.now());
+  scheduleIdleRefresh();
+}
+window.addEventListener('blur', cancelDragOnBlur);
+
+// M2.2 L1: Escape cancels a drag safely, including during an initial
+// mouse hold. A held pet is released at its current bounded position;
+// no throw momentum is inferred from an intentional cancellation.
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !dragCandidate) return;
+  event.preventDefault();
+  cancelDragOnBlur();
+});
+
+function onDragUp(event) {
+  // The OS may send mouseup from a different button during a gesture.
+  // Ignore it until the button that began the drag is released.
+  if (dragCandidate && event && typeof event.button === 'number' &&
+      event.button !== dragCandidate.button) return;
   window.removeEventListener('mousemove', onDragMove);
   window.removeEventListener('mouseup', onDragUp);
 
