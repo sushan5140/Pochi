@@ -858,7 +858,11 @@ window.addEventListener('keydown', (event) => {
   cancelDragOnBlur();
 });
 
-function onDragUp() {
+function onDragUp(event) {
+  // The OS may send mouseup from a different button during a gesture.
+  // Ignore it until the button that began the drag is released.
+  if (dragCandidate && event && typeof event.button === 'number' &&
+      event.button !== dragCandidate.button) return;
   window.removeEventListener('mousemove', onDragMove);
   window.removeEventListener('mouseup', onDragUp);
 
