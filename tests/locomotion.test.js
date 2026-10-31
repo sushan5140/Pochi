@@ -542,3 +542,23 @@ test('M2.2 L1 unrelated keyboard events do not cancel active drag', () => {
   assert.equal(h.sample('dragging'), true);
   assert.equal(h.dragEnds.length, 0);
 });
+
+test('M2.2 L2 unrelated mouseup does not release held left drag', () => {
+  const h = harness();
+  h.sample('sim.x = 130; sim.y = 90; dragging = true; dragCandidate = { active: true, button: 0, lastSample: { x: 130, y: 90, time: 0 }, velocity: { x: 0, y: 0 } }');
+  h.sample('onDragUp({ button: 2 })');
+  assert.equal(h.sample('dragging'), true);
+  assert.equal(h.dragEnds.length, 0);
+  h.sample('onDragUp({ button: 0 })');
+  assert.equal(h.sample('dragging'), false);
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('M2.2 L2 unrelated left mouseup cannot interrupt right drag', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, button: 2, lastSample: { x: 0, y: 0, time: -1000 }, velocity: { x: 0, y: 0 } }');
+  h.sample('onDragUp({ button: 0 })');
+  assert.equal(h.sample('dragging'), true);
+  h.sample('onDragUp({ button: 2 })');
+  assert.equal(h.dragEnds.length, 1);
+});
