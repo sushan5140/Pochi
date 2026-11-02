@@ -17,7 +17,8 @@ function harness() {
   const element = () => ({
     style: {},
     classList: { add() {}, remove() {} },
-    addEventListener() {},
+    handlers: {},
+    addEventListener(name, handler) { this.handlers[name] = handler; },
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 144, bottom: 144 }),
     set src(v) { this._src = v; },
     get src() { return this._src; }
@@ -60,7 +61,7 @@ function harness() {
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers, motionSetting };
+  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers, motionSetting, spriteHandlers: dom['pochi-sprite'].handlers };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -561,4 +562,29 @@ test('M2.2 L2 unrelated left mouseup cannot interrupt right drag', () => {
   assert.equal(h.sample('dragging'), true);
   h.sample('onDragUp({ button: 2 })');
   assert.equal(h.dragEnds.length, 1);
+});
+
+test('M2.2 L3 auxiliary-button mousedown never captures a drag', () => {
+  const h = harness();
+  h.spriteHandlers.mousedown({ button: 1, clientX: 10, clientY: 20 });
+  assert.equal(h.sample('dragCandidate'), null);
+  h.spriteHandlers.mousedown({ button: 0, clientX: 10, clientY: 20 });
+  assert.equal(h.sample('dragCandidate.button'), 0);
+});
+
+test('M2.2 L3 missing mouseup recovers drag when primary button is no longer held', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, button: 0 }');
+  h.sample('onDragMove({ buttons: 0, clientX: 30, clientY: 30 })');
+  assert.equal(h.sample('dragging'), false);
+  assert.equal(h.sample('dragCandidate'), null);
+  assert.equal(h.dragEnds.length, 1);
+});
+
+test('M2.2 L3 mousemove with initiating button held does not cancel gesture', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, button: 2, grabOffsetX: 0, grabOffsetY: 0, lastSample: { x: 0, y: 0, time: 0 }, velocity: { x: 0, y: 0 } }');
+  h.sample('onDragMove({ buttons: 2, clientX: 30, clientY: 30 })');
+  assert.equal(h.sample('dragging'), true);
+  assert.equal(h.dragEnds.length, 0);
 });

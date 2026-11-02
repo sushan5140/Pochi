@@ -754,6 +754,9 @@ let dragCandidate = null;
 sprite.addEventListener('contextmenu', (event) => event.preventDefault());
 
 sprite.addEventListener('mousedown', (event) => {
+  // Only primary/secondary buttons initiate a drag. Middle/auxiliary
+  // buttons must not capture listeners or block the next real gesture.
+  if (event.button !== 0 && event.button !== 2) return;
   if (dragCandidate) return;
   const rect = wrap.getBoundingClientRect();
   dragCandidate = {
@@ -793,6 +796,14 @@ function beginDrag() {
 
 function onDragMove(event) {
   if (!dragCandidate) return;
+  // If the initiating button is no longer held, the OS/browser dropped
+  // mouseup. End safely with no invented release velocity or throw.
+  // Synthetic forwarded events may omit buttons, so only inspect a number.
+  if (typeof event.buttons === 'number' &&
+      (event.buttons & (dragCandidate.button === 2 ? 2 : 1)) === 0) {
+    cancelDragOnBlur();
+    return;
+  }
 
   if (!dragCandidate.active) {
     if (dragCandidate.button !== 2 && dragCandidate.isMinigameTap &&
