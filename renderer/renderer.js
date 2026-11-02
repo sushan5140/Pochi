@@ -255,6 +255,9 @@ function landingScale() {
 
 // Virtual desktop coordinates are local to the fullscreen overlay.
 function clampToOverlay(x, y) {
+  // Invalid IPC/pointer coordinates must never propagate NaN into transforms.
+  x = Number.isFinite(x) ? x : sim.x;
+  y = Number.isFinite(y) ? y : sim.y;
   const maxX = Math.max(0, window.innerWidth - 144);
   const maxY = Math.max(0, window.innerHeight - 144);
   return { x: Math.min(maxX, Math.max(0, x)), y: Math.min(maxY, Math.max(0, y)) };
@@ -754,6 +757,7 @@ let dragCandidate = null;
 sprite.addEventListener('contextmenu', (event) => event.preventDefault());
 
 sprite.addEventListener('mousedown', (event) => {
+  if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
   // Only primary/secondary buttons initiate a drag. Middle/auxiliary
   // buttons must not capture listeners or block the next real gesture.
   if (event.button !== 0 && event.button !== 2) return;
@@ -796,6 +800,7 @@ function beginDrag() {
 
 function onDragMove(event) {
   if (!dragCandidate) return;
+  if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
   // If the initiating button is no longer held, the OS/browser dropped
   // mouseup. End safely with no invented release velocity or throw.
   // Synthetic forwarded events may omit buttons, so only inspect a number.

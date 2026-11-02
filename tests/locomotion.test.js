@@ -588,3 +588,20 @@ test('M2.2 L3 mousemove with initiating button held does not cancel gesture', ()
   assert.equal(h.sample('dragging'), true);
   assert.equal(h.dragEnds.length, 0);
 });
+
+test('M2.3 L1 invalid placement and targets never poison coordinates', () => {
+  const h = harness();
+  h.send({ state: 'idle', place: { x: NaN, y: Infinity } });
+  assert.equal(h.sample('Number.isFinite(sim.x) && Number.isFinite(sim.y)'), true);
+  h.send({ state: 'walking', target: { x: -Infinity, y: NaN } });
+  assert.equal(h.sample('Number.isFinite(sim.targetX) && Number.isFinite(sim.targetY)'), true);
+});
+
+test('M2.3 L1 malformed mouse moves are ignored during drag', () => {
+  const h = harness();
+  h.sample('dragging = true; dragCandidate = { active: true, button: 0, grabOffsetX: 0, grabOffsetY: 0, lastSample: { x: 20, y: 20, time: 0 }, velocity: { x: 0, y: 0 } }; sim.x = 20; sim.y = 20');
+  h.sample('onDragMove({ clientX: NaN, clientY: Infinity })');
+  assert.equal(h.sample('sim.x'), 20);
+  assert.equal(h.sample('sim.y'), 20);
+  assert.equal(h.sample('Number.isFinite(dragCandidate.velocity.x)'), true);
+});
