@@ -625,7 +625,21 @@ function applyState(data) {
     const target = clampToOverlay(data.target.x, data.target.y);
     const dx = target.x - sim.x;
     const dy = target.y - sim.y;
-    if (sim.moving && Math.hypot(dx, dy) > 0.5) {
+    // M2.3 L2: a target already beneath Pochi is an arrival, not a walk.
+    // Acknowledge it even when stationary: main.js may be waiting on the
+    // arrival IPC before scheduling the next wander leg.
+    if (Math.hypot(dx, dy) <= 0.5) {
+      sim.x = target.x;
+      sim.y = target.y;
+      sim.targetX = target.x;
+      sim.targetY = target.y;
+      if (sim.moving) stopMoving(true);
+      else window.pochi.settled({ x: sim.x, y: sim.y, reachedTarget: true });
+      render(performance.now());
+      scheduleIdleRefresh();
+      return;
+    }
+    if (sim.moving) {
       const desiredHeading = Math.atan2(dy, dx);
       const difference = Math.abs(shortestAngle(sim.heading, desiredHeading));
       // A sharp retarget becomes a brief stop-and-pivot. Slight corrections

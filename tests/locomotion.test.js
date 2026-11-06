@@ -11,6 +11,7 @@ function harness() {
   let tick = 0;
   let stateHandler;
   const dragEnds = [];
+  const settledEvents = [];
   const windowHandlers = {};
   const clearedTimers = [];
   const motionSetting = { matches: false, addEventListener(name, cb) { this.onChange = cb; } };
@@ -34,7 +35,7 @@ function harness() {
       removeEventListener() {},
       pochi: {
         onState: cb => { stateHandler = cb; },
-        settled() {},
+        settled: event => settledEvents.push(event),
         setIgnoreMouse() {},
         dragStart() {}, dragEnd: point => dragEnds.push(point)
       },
@@ -61,7 +62,7 @@ function harness() {
       next(tick);
     }
   };
-  return { send: data => stateHandler(data), sample, advance, dragEnds, windowHandlers, clearedTimers, motionSetting, spriteHandlers: dom['pochi-sprite'].handlers };
+  return { send: data => stateHandler(data), sample, advance, dragEnds, settledEvents, windowHandlers, clearedTimers, motionSetting, spriteHandlers: dom['pochi-sprite'].handlers };
 }
 
 test('acceleration begins from rest and ramps up without exceeding the gait cap', () => {
@@ -604,4 +605,43 @@ test('M2.3 L1 malformed mouse moves are ignored during drag', () => {
   assert.equal(h.sample('sim.x'), 20);
   assert.equal(h.sample('sim.y'), 20);
   assert.equal(h.sample('Number.isFinite(dragCandidate.velocity.x)'), true);
+});
+
+test('M2.3 L2 zero-distance target settles immediately without starting walk', () => {
+  const h = harness();
+  const x = h.sample('sim.x'), y = h.sample('sim.y');
+  h.send({ state: 'walking', gait: 'normal', target: { x, y } });
+  assert.equal(h.sample('sim.moving'), false);
+  assert.equal(h.sample('sim.currentSpeed'), 0);
+  assert.equal(h.settledEvents.length, 1);
+  assert.equal(h.settledEvents[0].reachedTarget, true);
+});
+
+test('M2.3 L2 near target snaps within tolerance and reports arrival once', () => {
+  const h = harness();
+  const x = h.sample('sim.x'), y = h.sample('sim.y');
+  h.send({ state: 'walking', gait: 'normal', target: { x: x + 0.3, y: y + 0.2 } });
+  assert.equal(h.sample('sim.moving'), false);
+  assert.ok(Math.abs(h.sample('sim.x') - (x + 0.3)) < 0.0001);
+  assert.equal(h.settledEvents.length, 1);
+  assert.equal(h.settledEvents[0].reachedTarget, true);
+});
+
+test('M2.3 L2 retarget to current position ends in-flight movement once', () => {
+  const h = harness();
+  h.send({ state: 'walking', gait: 'normal', target: { x: 450, y: 130 } });
+  assert.equal(h.sample('sim.moving'), true);
+  const x = h.sample('sim.x'), y = h.sample('sim.y');
+  h.send({ state: 'walking', gait: 'normal', target: { x, y } });
+  assert.equal(h.sample('sim.moving'), false);
+  assert.equal(h.settledEvents.length, 1);
+  assert.equal(h.settledEvents[0].reachedTarget, true);
+});
+
+test('M2.3 L2 normal distant target continues using locomotion loop', () => {
+  const h = harness();
+  const x = h.sample('sim.x'), y = h.sample('sim.y');
+  h.send({ state: 'walking', gait: 'normal', target: { x: x + 30, y } });
+  assert.equal(h.sample('sim.moving'), true);
+  assert.equal(h.settledEvents.length, 0);
 });
