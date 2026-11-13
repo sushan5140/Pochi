@@ -1,0 +1,33 @@
+appId: io.github.sushan5140.pochi
+productName: Pochi
+asar: true
+directories:
+  output: dist
+files:
+  - main.js
+  - preload.js
+  - memoryPreload.js
+  - projectPromptPreload.js
+  - renderer/**/*
+  - src/**/*
+  - assets/**/*
+  - package.json
+win:
+  icon: assets/pochi.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: true
+  perMachine: false
+  allowElevation: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  artifactName: Pochi-Setup-${version}-${arch}.${ext}
+portable:
+  artifactName: Pochi-Portable-${version}-${arch}.${ext}
