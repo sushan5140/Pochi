@@ -1,0 +1,99 @@
+name: Build Pochi for Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-installer.yml'
+      - 'electron-builder.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'main.js'
+      - 'preload.js'
+      - 'memoryPreload.js'
+      - 'projectPromptPreload.js'
+      - 'renderer/**'
+      - 'src/**'
+      - 'assets/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked app dependencies
+        run: npm ci
+
+      - name: Verify code and regression tests
+        run: npm run check
+
+      - name: Build Windows installer and portable executable
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx --yes electron-builder@26.18.0 --win nsis portable --x64 --publish never
+
+      - name: Verify output names and generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $files = @(
+            'dist/Pochi-Setup-0.1.0-x64.exe',
+            'dist/Pochi-Portable-0.1.0-x64.exe'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) {
+              throw "Expected Windows download is missing: $file"
+            }
+          }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path $file -Leaf)"
+          }
+          $lines | Set-Content -Path 'dist/SHA256SUMS.txt' -Encoding ascii
+
+      - name: Save downloadable build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pochi-Windows-x64
+          path: |
+            dist/Pochi-Setup-0.1.0-x64.exe
+            dist/Pochi-Portable-0.1.0-x64.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish first public Windows preview
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v0.1.0-preview.1'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host 'Preview release already exists. Do not silently replace binaries for an existing version.'
+            exit 0
+          }
+          $notes = @'
+          First installable Windows x64 preview of Pochi.
+
+          - Setup.exe: one-click, per-user installation with desktop/Start Menu shortcuts.
+          - Portable.exe: run directly, with no installation.
+          - Both executables are currently unsigned. Windows SmartScreen may warn.
+          - GitHub Actions verified source syntax and renderer regression tests, but a human Windows desktop smoke test is still required before calling it a stable release.
+
+          Download either executable below; do not download GitHub's Source code ZIP.
+          '@
+          gh release create $tag 'dist/Pochi-Setup-0.1.0-x64.exe' 'dist/Pochi-Portable-0.1.0-x64.exe' 'dist/SHA256SUMS.txt' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Pochi v0.1.0 Preview 1 - Windows' --notes $notes
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Release publication failed. The build artifacts may still be available from this Actions run.'
+          }
