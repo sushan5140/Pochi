@@ -5,7 +5,9 @@
   "main": "main.js",
   "private": true,
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test tests/locomotion.test.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer/renderer.js && npm test"
   },
   "dependencies": {
     "active-win": "^8.2.1",
