@@ -1,8 +1,34 @@
-# Pochi
+# Pochi 🐾
 
-Pochi is an experimental Electron desktop companion: a small, transparent, always-on-top pet that moves around your desktop, reacts to activity, and can nudge you about breaks and other daily routines.
+A tiny desktop companion that walks around your screen, reacts to activity, and nudges you about breaks and everyday routines.
 
-> **Status:** Active prototype, not a packaged release. The renderer regression suite does not replace hands-on Electron testing. The documented release checks are currently aimed at Windows.
+## Download Pochi — Windows (64-bit)
+
+**You do not need Git, Node.js, npm, a terminal, or the source ZIP.**
+
+### Option 1 — Install Pochi (recommended)
+
+**[Download Pochi for Windows — Setup.exe](https://github.com/sushan5140/Pochi/releases/download/v0.1.0-preview.1/Pochi-Setup-0.1.0-x64.exe)**
+
+1. Download the `Pochi-Setup-0.1.0-x64.exe` file.
+2. Open the installer. It is configured to install for your Windows user and create Desktop and Start Menu shortcuts.
+3. When installation finishes, Pochi is configured to launch. Use the **Pochi** desktop shortcut the next time.
+
+### Option 2 — Just run Pochi (no install)
+
+**[Download Pochi Portable — Portable.exe](https://github.com/sushan5140/Pochi/releases/download/v0.1.0-preview.1/Pochi-Portable-0.1.0-x64.exe)**
+
+Open the downloaded `Pochi-Portable-0.1.0-x64.exe` directly. There is no setup process, and it does not create a desktop shortcut automatically.
+
+**Important:** These are early, **unsigned Windows preview** builds. Windows SmartScreen or antivirus software may show an unknown-publisher warning. Only run files you trust; check that the download comes from this GitHub repository and verify against [the release's SHA-256 checksums](https://github.com/sushan5140/Pochi/releases/tag/v0.1.0-preview.1) if you want extra assurance. This is not yet a fully desktop-tested stable release.
+
+**Do not use GitHub's green “Code → Download ZIP” button or the automatic “Source code (ZIP)” links.** Those contain development files, not an installable Pochi app.
+
+[See the Windows preview release and all download files](https://github.com/sushan5140/Pochi/releases/tag/v0.1.0-preview.1).
+
+## For developers
+
+Pochi is an experimental Electron app. The existing automated renderer regression suite does not replace hands-on desktop testing. The documented release checks currently focus on Windows.
 
 ## Getting started
 
