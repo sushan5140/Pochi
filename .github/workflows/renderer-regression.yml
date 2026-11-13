@@ -11,7 +11,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Syntax check
-        run: node --check renderer/renderer.js
-      - name: Locomotion and animation regression
-        run: node --test tests/locomotion.test.js
+      - name: Check source syntax and renderer regressions
+        run: npm run check
